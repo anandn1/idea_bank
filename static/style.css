@@ -152,11 +152,12 @@ body {
   flex: 1;
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  align-items: start;
   min-height: 0;
 }
 
 .column {
+  display: flex;
+  flex-direction: column;
   border-right: 1px solid var(--border);
   padding: 16px 12px;
   height: 100%;
@@ -185,6 +186,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  /* fills all remaining column height even when empty/short, so the
+     whole column is a valid drop target, not just the area its cards
+     happen to occupy */
+  min-height: 40px;
 }
 
 /* ---- cards ---- */
