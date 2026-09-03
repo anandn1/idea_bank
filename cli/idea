@@ -96,7 +96,11 @@ def parse_ids_and_status(
     `move`'s ids argument is parsed as raw strings and split out here
     instead. Returns (None, error_message) on any problem.
     """
-    trailing_is_status = bool(tokens) and tokens[-1] in dbutil.STATUSES
+    if not tokens:
+        return None, "no idea id(s) given"
+
+    trailing = tokens[-1]
+    trailing_is_status = trailing in dbutil.STATUSES
 
     if status_flag and trailing_is_status:
         return None, "specify the target status only once: a trailing word or a flag, not both"
@@ -104,6 +108,9 @@ def parse_ids_and_status(
         id_tokens, status = tokens, status_flag
     elif trailing_is_status:
         id_tokens, status = tokens[:-1], tokens[-1]
+    elif not trailing.isdigit():
+        # doesn't look like an id either -- most likely a typo'd status
+        return None, f"invalid status: {trailing!r} (choose from {', '.join(dbutil.STATUSES)})"
     else:
         return None, (
             "missing target status: give it as a trailing word (e.g. 'active') "

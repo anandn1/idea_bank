@@ -4,12 +4,19 @@ Kept dependency-free (stdlib only) so the CLI works without the venv active.
 """
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent / "data" / "ideas.db"
+# IDEA_BANK_DB_PATH overrides the default location -- used by the test
+# suite (subprocess-invoked CLI tests) to point at an isolated DB file
+# instead of the real one. Unset in normal use.
+DB_PATH = Path(
+    os.environ.get("IDEA_BANK_DB_PATH")
+    or (Path(__file__).resolve().parent / "data" / "ideas.db")
+)
 
 STATUSES = ("inbox", "active", "queued", "horizon", "archive")
 

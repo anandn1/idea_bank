@@ -30,6 +30,24 @@ To run the server by hand instead of via systemd:
 .venv/bin/python server.py
 ```
 
+## Testing
+
+```
+.venv/bin/pip install -r requirements-dev.txt   # adds pytest to the venv
+.venv/bin/pytest
+```
+
+Covers `dbutil.py`, `cli/idea` (both its pure helpers directly and full
+subprocess invocations asserting on `--json` output and exit codes -- the
+same contract a human or an agent sees), `scripts/expire.py`, and
+`scripts/migrate.py`. Every test runs against an isolated temp SQLite file
+(never `data/ideas.db`) via the `IDEA_BANK_DB_PATH` env var dbutil.py reads
+when set; `migrate.py`'s tests additionally point `OLD_INBOX` at a throwaway
+file, so the suite can never write to or read the real `~/ideas/inbox.md`.
+Not covered yet: `server.py` (the Flask API) and the GUI itself -- those
+were verified manually (curl / Playwright) during development but have no
+automated tests.
+
 ## How it works end to end
 
 **Capture / query CLI** — `idea` (`cli/idea`, symlinked onto `PATH`) opens
