@@ -12,7 +12,7 @@ including one accidental write during development that's disclosed there.
 ## Running it
 
 ```
-cd ~/idea-bank-v2
+cd ~/idea_bank
 ./install.sh
 ```
 
@@ -71,6 +71,24 @@ partial id list never leaves things half-moved.
 Note: `-h` is reserved for `--help` (argparse's default), which is why the
 horizon shortcut is uppercase `-H` — everywhere else in this project
 (the GUI, this README) horizon is lowercase `h`.
+
+**Structured fields** — every idea can carry arbitrary `key=value` metadata
+(due dates, priority, owner, a URL, whatever) on top of its text. There's no
+fixed schema: nothing is required, an idea with no fields is indistinguishable
+from before, and the vocabulary of keys is entirely up to you.
+
+```
+idea "book a room" --field due=2026-10-01 --field priority=high
+idea edit 12 --field owner=me          # add/overwrite a field, text unchanged
+idea edit 12 --unset-field owner       # remove a field
+idea show 12                           # prints fields if the idea has any
+idea list                              # a leading `*` marks ideas that have fields
+```
+
+Stored as a JSON object in a `fields` column (`NULL`/`{}` when unused). The
+JSON API accepts/returns the same shape: `POST`/`PATCH .../api/ideas` take an
+optional `"fields": {...}` object (PATCH replaces the whole object when
+given), and every idea in `GET /api/ideas` includes `"fields"`.
 
 **GUI** — `server.py` serves `static/index.html` and a small JSON API
 (`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`) backed by the same
@@ -170,7 +188,7 @@ you're ready to touch that file.
   symlinking the new CLI wasn't enough for `idea "text"` to reach the new
   database. Per your choice, the old `idea() { ... }` function in `~/.zshrc`
   was **commented out** (not deleted) with a note on how to restore it. This
-  is the one change outside `~/idea-bank-v2/` and `~/ideas/` made by this
+  is the one change outside `~/idea_bank/` and `~/ideas/` made by this
   project. `~/ideas/inbox.md` and everything else about the old system is
   unaffected — if you uncomment the function again, it will resume appending
   to `inbox.md` exactly as before. The other old shell functions
@@ -198,8 +216,12 @@ you're ready to touch that file.
 
 ## Project layout
 
+Lives at `~/idea_bank/` (the project's name -- "idea-bank-v2", as in the
+successor to the old `~/ideas/` system -- is separate from its directory
+name):
+
 ```
-idea-bank-v2/
+idea_bank/
   server.py            Flask app: JSON API + serves static/
   dbutil.py            shared SQLite schema/connection helper
   static/
