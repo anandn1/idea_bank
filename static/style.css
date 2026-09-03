@@ -36,7 +36,9 @@ body {
 .topbar {
   display: flex;
   align-items: center;
-  gap: 24px;
+  flex-wrap: wrap;
+  row-gap: 8px;
+  gap: 16px;
   padding: 14px 20px;
   background: var(--panel);
   border-bottom: 1px solid var(--border-strong);
@@ -80,6 +82,48 @@ body {
 
 #capture-input::placeholder {
   color: var(--text-dim);
+}
+
+.capture-target {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.target-pill {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 3px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.target-pill.selected {
+  color: var(--text);
+  background: #262b35;
+}
+
+.target-pill[data-status="active"].selected { color: var(--gold); border-color: var(--gold); }
+.target-pill[data-status="queued"].selected,
+.target-pill[data-status="horizon"].selected { color: var(--teal); border-color: var(--teal); }
+.target-pill[data-status="archive"].selected { color: var(--red); border-color: var(--red); }
+
+.mode-indicator {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--gold);
+  border: 1px solid var(--gold);
+  border-radius: 3px;
+  padding: 3px 9px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mode-indicator[hidden] {
+  display: none;
 }
 
 .help {
@@ -165,6 +209,11 @@ body {
   background: #22262f;
 }
 
+.card.in-range {
+  border-color: var(--border-strong);
+  background: #20242c;
+}
+
 .card-text {
   font-size: 13.5px;
   line-height: 1.4;
@@ -172,6 +221,37 @@ body {
   margin-bottom: 8px;
   word-wrap: break-word;
   white-space: pre-wrap;
+}
+
+.card-edit {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13.5px;
+  line-height: 1.4;
+  border: 1px solid var(--gold);
+  border-radius: 3px;
+  padding: 6px 8px;
+  resize: vertical;
+  min-height: 4em;
+  outline: none;
+}
+
+.card-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.field-pill {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 5px;
 }
 
 .card-meta {

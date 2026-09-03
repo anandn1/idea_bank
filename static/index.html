@@ -17,12 +17,21 @@
       autofocus
     >
   </form>
+  <div class="capture-target" id="capture-target" role="group" aria-label="capture target status">
+    <button type="button" class="target-pill selected" data-status="inbox">inbox</button>
+    <button type="button" class="target-pill" data-status="active">active</button>
+    <button type="button" class="target-pill" data-status="queued">queued</button>
+    <button type="button" class="target-pill" data-status="horizon">horizon</button>
+    <button type="button" class="target-pill" data-status="archive">archive</button>
+  </div>
+  <div class="mode-indicator" id="mode-indicator" hidden></div>
   <div class="help">
     <span><b>j/k</b> move</span>
-    <span><b>a</b> active</span>
-    <span><b>q</b> queued</span>
-    <span><b>h</b> horizon</span>
-    <span><b>x</b> archive</span>
+    <span><b>a/q/h/x</b> move idea</span>
+    <span><b>v</b> select range</span>
+    <span><b>e</b> edit</span>
+    <span><b>d</b> delete</span>
+    <span><b>/</b> capture</span>
   </div>
 </header>
 

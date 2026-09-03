@@ -93,18 +93,35 @@ given), and every idea in `GET /api/ideas` includes `"fields"`.
 **GUI** — `server.py` serves `static/index.html` and a small JSON API
 (`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`) backed by the same
 SQLite file. `static/app.js` renders five columns (Inbox, Active, Queued,
-Horizon, Archive) and is built to be used from the keyboard:
+Horizon, Archive) and covers the same ground as the CLI, keyboard-first:
 
 - Typing anywhere outside the capture box is a shortcut; the capture input
   itself is auto-focused on load and via `/`.
-- `j` / `k` or `↓` / `↑` move the selection between idea cards (flattened
-  across all five columns, left to right).
-- `a` / `q` / `h` / `x` move the selected card to Active / Queued / Horizon /
-  Archive. The card animates (slides) into its new column — the one
-  deliberate motion in the whole UI; it's skipped automatically if the OS
-  `prefers-reduced-motion` setting is on.
-- Clicking a card selects it (mouse fallback); clicking is not required for
-  anything.
+- **Capture-to-status**: pills next to the capture input (click, or
+  Alt+I/A/Q/H/X while the input is focused) choose where the next capture
+  goes; it resets to Inbox after each capture, matching the CLI's per-call
+  default.
+- `j` / `k` or `↓` / `↑` move the focus between idea cards (flattened across
+  all five columns, left to right).
+- `a` / `q` / `h` / `x` move the focused (or selected, see below) card(s).
+  A single card slides into its new column — the one deliberate motion in
+  the UI, skipped automatically under `prefers-reduced-motion`; moving more
+  than one at once re-renders directly instead, since several simultaneous
+  slides across columns read as noise, not signal.
+- `e` edits the focused card's text in place (Enter saves, Escape cancels,
+  clicking away saves) — the GUI equivalent of `idea edit`.
+- `d` (or Delete/Backspace) deletes the selected card(s), after a confirm
+  prompt — the GUI equivalent of `idea delete`. Cannot be undone.
+- `v` toggles range-select ("visual mode", vim-style): `j`/`k` extend the
+  range from wherever `v` was pressed, a status bar shows the count, and
+  `a`/`q`/`h`/`x`/`d` then apply to every selected card at once — the GUI
+  equivalent of the CLI's batch `move`/`delete`. `Escape` cancels back to a
+  single selection.
+- Structured fields, if an idea has any, show as small pills on its card
+  (read-only in the GUI for now — set/edit them via `idea edit --field`
+  or the API's `PATCH .../fields`).
+- Clicking a card selects it (mouse fallback); Shift+click extends a range
+  the same way `v` + `j`/`k` does. Clicking is never required.
 
 **Expiry** — `scripts/expire.py` is the server-side replacement for the old
 `expire.sh`. It finds every idea with `status='queued'` whose `updated_at` is
