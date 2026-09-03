@@ -29,6 +29,14 @@ STATUS_FLAGS = {
     "archive": ("-x", "--archive"),
 }
 
+STATUS_DESCRIPTIONS = {
+    "inbox": "just captured, not yet sorted (default for new ideas)",
+    "active": "currently being worked on",
+    "queued": "worth doing, not now -- auto-moves to archive after 8 weeks untouched",
+    "horizon": "long-term / someday, reviewed quarterly",
+    "archive": "done, shelved, or expired",
+}
+
 
 def add_status_flags(parser: argparse.ArgumentParser, help_verb: str) -> None:
     """Add -a/-q/-H/-x plus --status as a mutually exclusive group."""
@@ -36,7 +44,7 @@ def add_status_flags(parser: argparse.ArgumentParser, help_verb: str) -> None:
     for status, flags in STATUS_FLAGS.items():
         group.add_argument(
             *flags, dest="status", action="store_const", const=status,
-            help=f"{help_verb} {status}",
+            help=f"{help_verb} {status} ({STATUS_DESCRIPTIONS[status]})",
         )
     group.add_argument(
         "--status", dest="status", choices=dbutil.STATUSES,
@@ -51,13 +59,20 @@ def add_json_flag(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def status_description_lines() -> str:
+    return "\n".join(
+        f"  {status:<8} {STATUS_DESCRIPTIONS[status]}" for status in dbutil.STATUSES
+    )
+
+
 def build_epilog() -> str:
     status_lines = "\n".join(
-        f"  {status:<8} {'/'.join(STATUS_FLAGS[status]) if status in STATUS_FLAGS else '(default, no flag needed)'}"
+        f"  {status:<8} {('/'.join(STATUS_FLAGS[status]) if status in STATUS_FLAGS else '(default)'):<14} "
+        f"{STATUS_DESCRIPTIONS[status]}"
         for status in dbutil.STATUSES
     )
     return (
-        "Statuses (and their capture/list shortcut flags):\n"
+        "Statuses (flag to capture/list straight into it -- description):\n"
         f"{status_lines}\n"
         "\n"
         "Examples:\n"
@@ -108,6 +123,8 @@ def build_parser() -> argparse.ArgumentParser:
     move = subparsers.add_parser(
         "move", help="change an idea's status",
         description="Move an idea to a different status column.",
+        epilog=f"Statuses:\n{status_description_lines()}",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     move.add_argument("id", type=int, help="idea id")
     move.add_argument("status", choices=dbutil.STATUSES, help="new status")
