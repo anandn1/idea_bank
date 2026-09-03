@@ -87,6 +87,15 @@ function buildCard(idea) {
       selectCard(idea.id);
     }
   });
+  card.addEventListener("dblclick", () => openModal(idea.id));
+
+  card.draggable = true;
+  card.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("text/plain", String(idea.id));
+    e.dataTransfer.effectAllowed = "move";
+    requestAnimationFrame(() => card.classList.add("dragging"));
+  });
+  card.addEventListener("dragend", () => card.classList.remove("dragging"));
 
   return card;
 }
@@ -245,21 +254,11 @@ async function createIdea(text, status) {
   render();
 }
 
-async function patchStatus(id, status) {
+async function patchIdea(id, payload) {
   const res = await fetch(`/api/ideas/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status }),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
-
-async function patchText(id, text) {
-  const res = await fetch(`/api/ideas/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -299,7 +298,7 @@ async function moveIdeaAnimated(id, status) {
   }
 
   try {
-    const updated = await patchStatus(id, status);
+    const updated = await patchIdea(id, { status });
     Object.assign(idea, updated);
   } catch (err) {
     console.error("failed to move idea, reverting", err);
@@ -318,7 +317,7 @@ async function applyStatusToSelected(status) {
   } else {
     // batch: skip the per-card slide (would just look like visual noise
     // firing across several columns at once) and re-render once instead
-    const results = await Promise.allSettled(ids.map((id) => patchStatus(id, status)));
+    const results = await Promise.allSettled(ids.map((id) => patchIdea(id, { status })));
     results.forEach((r, i) => {
       if (r.status === "fulfilled") {
         const idea = ideas.find((x) => x.id === ids[i]);
@@ -392,12 +391,200 @@ async function commitEdit(id, newText) {
   updateSelectionClasses();
 
   try {
-    const updated = await patchText(id, text);
+    const updated = await patchIdea(id, { text });
     if (idea) Object.assign(idea, updated);
   } catch (err) {
     console.error("failed to save edit", err);
   }
 }
+
+// ---- drag and drop: drop zones are the 5 permanent column containers,
+// wired once here since render() only ever replaces their children ----
+
+document.querySelectorAll(".cards").forEach((container) => {
+  container.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    container.classList.add("drag-over");
+  });
+  container.addEventListener("dragleave", () => {
+    container.classList.remove("drag-over");
+  });
+  container.addEventListener("drop", (e) => {
+    e.preventDefault();
+    container.classList.remove("drag-over");
+    const id = Number(e.dataTransfer.getData("text/plain"));
+    const status = container.closest(".column").dataset.status;
+    if (!id || !status) return;
+    selectCard(id);
+    moveIdeaAnimated(id, status);
+  });
+});
+
+// ---- detail modal: click-to-open examine/edit view ----
+
+let modalIdeaId = null;
+let modalPending = null; // { text, status, fields: [[key, value], ...], notes }
+
+const modalBackdrop = document.getElementById("modal-backdrop");
+const modalStatusPills = document.getElementById("modal-status-pills");
+const modalTextEl = document.getElementById("modal-text");
+const modalFieldsEl = document.getElementById("modal-fields");
+const modalNotesEl = document.getElementById("modal-notes");
+const modalMetaEl = document.getElementById("modal-meta");
+
+modalTextEl.addEventListener("input", () => {
+  if (modalPending) modalPending.text = modalTextEl.value;
+});
+modalNotesEl.addEventListener("input", () => {
+  if (modalPending) modalPending.notes = modalNotesEl.value;
+});
+
+function openModal(id) {
+  const idea = ideas.find((i) => i.id === id);
+  if (!idea) return;
+  modalIdeaId = id;
+  modalPending = {
+    text: idea.text,
+    status: idea.status,
+    fields: Object.entries(idea.fields || {}),
+    notes: idea.notes || "",
+  };
+  renderModal(idea);
+  modalBackdrop.hidden = false;
+  requestAnimationFrame(() => modalTextEl.focus());
+}
+
+function renderModal(idea) {
+  modalTextEl.value = modalPending.text;
+  modalNotesEl.value = modalPending.notes;
+  modalMetaEl.textContent = `created ${idea.created_at}   updated ${idea.updated_at}`;
+
+  modalStatusPills.innerHTML = "";
+  for (const status of STATUSES) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "target-pill" + (status === modalPending.status ? " selected" : "");
+    btn.dataset.status = status;
+    btn.textContent = status;
+    btn.addEventListener("click", () => {
+      modalPending.status = status;
+      renderModal(idea);
+    });
+    modalStatusPills.appendChild(btn);
+  }
+
+  renderModalFields();
+}
+
+function renderModalFields() {
+  modalFieldsEl.innerHTML = "";
+  modalPending.fields.forEach(([key, value], index) => {
+    const row = document.createElement("div");
+    row.className = "field-row";
+
+    const keyInput = document.createElement("input");
+    keyInput.type = "text";
+    keyInput.placeholder = "key";
+    keyInput.value = key;
+    keyInput.addEventListener("input", () => {
+      modalPending.fields[index][0] = keyInput.value;
+    });
+
+    const valueInput = document.createElement("input");
+    valueInput.type = "text";
+    valueInput.placeholder = "value";
+    valueInput.value = value;
+    valueInput.addEventListener("input", () => {
+      modalPending.fields[index][1] = valueInput.value;
+    });
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "field-row-remove";
+    removeBtn.textContent = "×";
+    removeBtn.addEventListener("click", () => {
+      modalPending.fields.splice(index, 1);
+      renderModalFields();
+    });
+
+    row.appendChild(keyInput);
+    row.appendChild(valueInput);
+    row.appendChild(removeBtn);
+    modalFieldsEl.appendChild(row);
+  });
+}
+
+document.getElementById("modal-add-field").addEventListener("click", () => {
+  modalPending.fields.push(["", ""]);
+  renderModalFields();
+  const lastRow = modalFieldsEl.querySelector(".field-row:last-child input");
+  if (lastRow) lastRow.focus();
+});
+
+async function closeModal(save) {
+  const id = modalIdeaId;
+  const pending = modalPending;
+  modalBackdrop.hidden = true;
+  modalIdeaId = null;
+  modalPending = null;
+  if (!save || id === null) return;
+
+  const idea = ideas.find((i) => i.id === id);
+  if (!idea) return;
+
+  const fieldsObj = {};
+  for (const [key, value] of pending.fields) {
+    const trimmedKey = key.trim();
+    if (trimmedKey) fieldsObj[trimmedKey] = value;
+  }
+  const trimmedText = pending.text.trim();
+
+  const payload = { fields: fieldsObj };
+  if (trimmedText) payload.text = trimmedText;
+  if (pending.status !== idea.status) payload.status = pending.status;
+  if (pending.notes !== (idea.notes || "")) payload.notes = pending.notes || null;
+
+  try {
+    const updated = await patchIdea(id, payload);
+    Object.assign(idea, updated);
+    render();
+    updateSelectionClasses();
+  } catch (err) {
+    console.error("failed to save idea", err);
+  }
+}
+
+document.getElementById("modal-close").addEventListener("click", () => closeModal(true));
+document.getElementById("modal-done").addEventListener("click", () => closeModal(true));
+modalBackdrop.addEventListener("click", (e) => {
+  if (e.target === modalBackdrop) closeModal(true);
+});
+
+document.getElementById("modal-delete").addEventListener("click", async () => {
+  if (modalIdeaId === null) return;
+  if (!window.confirm("Delete this idea? This can't be undone.")) return;
+  const id = modalIdeaId;
+  modalBackdrop.hidden = true;
+  modalIdeaId = null;
+  modalPending = null;
+
+  try {
+    await deleteIdeaRequest(id);
+  } catch (err) {
+    console.error("failed to delete idea", err);
+    return;
+  }
+  ideas = ideas.filter((i) => i.id !== id);
+  render();
+  if (flatOrder.length > 0) {
+    selectCard(flatOrder[0]);
+  } else {
+    focusId = null;
+    selectedIds = new Set();
+    updateModeIndicator();
+  }
+});
 
 // ---- capture ----
 
@@ -427,6 +614,14 @@ captureForm.addEventListener("submit", (e) => {
 const ALT_STATUS_KEYS = { i: "inbox", a: "active", q: "queued", h: "horizon", x: "archive" };
 
 document.addEventListener("keydown", (e) => {
+  if (!modalBackdrop.hidden) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeModal(false); // Escape discards, matching the inline-edit convention
+    }
+    return; // let typing in the modal's own fields behave normally otherwise
+  }
+
   const activeTag = document.activeElement && document.activeElement.tagName;
   const inTextField = activeTag === "INPUT" || activeTag === "TEXTAREA";
 
@@ -470,6 +665,12 @@ document.addEventListener("keydown", (e) => {
       break;
     case "e":
       startEdit();
+      break;
+    case "Enter":
+      if (focusId !== null && editingId === null) {
+        e.preventDefault();
+        openModal(focusId);
+      }
       break;
     case "d":
     case "Delete":

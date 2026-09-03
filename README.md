@@ -117,9 +117,17 @@ Horizon, Archive) and covers the same ground as the CLI, keyboard-first:
   `a`/`q`/`h`/`x`/`d` then apply to every selected card at once — the GUI
   equivalent of the CLI's batch `move`/`delete`. `Escape` cancels back to a
   single selection.
-- Structured fields, if an idea has any, show as small pills on its card
-  (read-only in the GUI for now — set/edit them via `idea edit --field`
-  or the API's `PATCH .../fields`).
+- **Enter** (or double-click, or drag) opens the focused card's **detail
+  view** — a modal with the full text (editable), status (as pills), every
+  structured field (editable, with an "add field" row), freeform notes, and
+  a delete button. Typing in the modal never triggers board shortcuts.
+  Closing it (the `×`, "done", or clicking the backdrop) saves everything
+  at once; **Escape discards** instead, matching the inline `e` edit's
+  convention. This is the GUI's full equivalent of `idea show` + `idea edit
+  --field` + `idea edit --unset-field` combined.
+- **Drag and drop**: drag a card onto another column to move it there (same
+  effect as `a`/`q`/`h`/`x`, mouse-driven). Single-card only — for moving
+  several at once, use `v` + `j`/`k` + a status key instead.
 - Clicking a card selects it (mouse fallback); Shift+click extends a range
   the same way `v` + `j`/`k` does. Clicking is never required.
 

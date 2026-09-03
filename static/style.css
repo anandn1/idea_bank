@@ -214,6 +214,20 @@ body {
   background: #20242c;
 }
 
+.card[draggable="true"] {
+  cursor: grab;
+}
+
+.card.dragging {
+  opacity: 0.4;
+}
+
+.cards.drag-over {
+  background: rgba(201, 161, 91, 0.06);
+  outline: 1px dashed var(--border-strong);
+  outline-offset: -4px;
+}
+
 .card-text {
   font-size: 13.5px;
   line-height: 1.4;
@@ -288,3 +302,194 @@ body {
    changes column -- is driven from app.js via the FLIP technique. It
    checks prefers-reduced-motion itself and skips the animation there,
    so no motion-related rule is needed in this stylesheet. */
+
+/* ---- detail modal ---- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 12, 15, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 100;
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.modal {
+  width: 100%;
+  max-width: 560px;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 18px 20px;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.modal-status-pills {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.modal-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.modal-text {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+  margin-bottom: 16px;
+}
+
+.modal-text:focus {
+  border-color: var(--gold);
+}
+
+.modal-section {
+  margin-bottom: 16px;
+}
+
+.modal-section-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+.field-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.field-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 8px;
+  border-radius: 3px;
+  outline: none;
+}
+
+.field-row input:focus {
+  border-color: var(--gold);
+}
+
+.field-row-remove {
+  flex-shrink: 0;
+  width: 28px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.field-row-remove:hover {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.modal-add-field {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.modal-add-field:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
+
+.modal-notes {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  padding: 8px 10px;
+  resize: vertical;
+  outline: none;
+}
+
+.modal-notes:focus {
+  border-color: var(--gold);
+}
+
+.modal-meta {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-delete {
+  background: transparent;
+  border: 1px solid var(--red);
+  color: var(--red);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.modal-done {
+  background: transparent;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 3px;
+  cursor: pointer;
+}
