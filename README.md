@@ -1,0 +1,208 @@
+# idea-bank-v2
+
+A local, keyboard-first replacement for the old `~/ideas/` capture system:
+Python (Flask) + SQLite backend, single-page HTML/CSS/JS GUI, all served on
+`localhost` only. No sign-in, no external network calls.
+
+The old system under `~/ideas/` (inbox.md, expire.sh, active/queued/archive/horizon,
+idea-triage.timer, idea-horizon-review.timer) is **untouched** — see
+[Confirmation: ~/ideas/ was left alone](#confirmation-ideas-was-left-alone) below,
+including one accidental write during development that's disclosed there.
+
+## Running it
+
+```
+cd ~/idea-bank-v2
+./install.sh
+```
+
+This creates a venv, installs Flask, symlinks `cli/idea` to `~/.local/bin/idea`,
+installs the new systemd user units (`idea-bank-v2-*`, separate names from the
+old `idea-triage`/`idea-horizon-review` units, which are left alone), and starts
+the server as a persistent user service.
+
+Open **http://127.0.0.1:8420/** — or just run `idea-bank-v2-triage.timer` once,
+which opens it for you.
+
+To run the server by hand instead of via systemd:
+
+```
+.venv/bin/python server.py
+```
+
+## How it works end to end
+
+**Capture / query CLI** — `idea` (`cli/idea`, symlinked onto `PATH`) opens
+`data/ideas.db` directly with Python's `sqlite3` module; it does not need the
+Flask server running. Run `idea --help` (or `idea <command> --help`) for full
+usage. It's built for both a human at a keyboard and an AI agent scripting
+against it: every subcommand accepts `--json` for machine-readable output,
+and exit codes are meaningful (`0` success, `1` valid request but the target
+idea didn't exist / was rejected, `2` bad arguments).
+
+```
+idea "ship the migration"          # capture -> inbox (bare text = capture)
+idea -q "revisit nvim config"      # capture straight -> queued
+idea -a / -H / -x                  # ...active / horizon / archive
+idea --status queued "text"        # long form of the same flags
+
+idea list                          # all ideas, newest-updated first
+idea list -q                       # only queued
+idea list --json                   # machine-readable, for scripting/agents
+
+idea show 12                       # full detail for one idea
+idea move 12 active --json         # change status, print the updated idea as JSON
+idea edit 12 "new text"            # rewrite text
+idea delete 12                     # delete
+```
+
+Note: `-h` is reserved for `--help` (argparse's default), which is why the
+horizon shortcut is uppercase `-H` — everywhere else in this project
+(the GUI, this README) horizon is lowercase `h`.
+
+**GUI** — `server.py` serves `static/index.html` and a small JSON API
+(`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`) backed by the same
+SQLite file. `static/app.js` renders five columns (Inbox, Active, Queued,
+Horizon, Archive) and is built to be used from the keyboard:
+
+- Typing anywhere outside the capture box is a shortcut; the capture input
+  itself is auto-focused on load and via `/`.
+- `j` / `k` or `↓` / `↑` move the selection between idea cards (flattened
+  across all five columns, left to right).
+- `a` / `q` / `h` / `x` move the selected card to Active / Queued / Horizon /
+  Archive. The card animates (slides) into its new column — the one
+  deliberate motion in the whole UI; it's skipped automatically if the OS
+  `prefers-reduced-motion` setting is on.
+- Clicking a card selects it (mouse fallback); clicking is not required for
+  anything.
+
+**Expiry** — `scripts/expire.py` is the server-side replacement for the old
+`expire.sh`. It finds every idea with `status='queued'` whose `updated_at` is
+more than 8 weeks old and flips it to `status='archive'`, logging each move to
+stdout and to `data/expire.log`. It's run weekly by
+`idea-bank-v2-triage.service`, which then opens the GUI in your default
+browser via `xdg-open`.
+
+**Quarterly review** — `idea-bank-v2-horizon-review.timer` fires quarterly and
+opens `http://127.0.0.1:8420/#horizon`, which scrolls the Horizon column into
+view; if `xdg-open` isn't available it falls back to `notify-send`.
+
+## Migration
+
+`scripts/migrate.py` reads `~/ideas/inbox.md` **read-only** — it never writes
+to, moves, or deletes anything under `~/ideas/`. Each line
+(`YYYY-MM-DD HH:MM text`) becomes a `status='inbox'` row, with the original
+timestamp preserved as both `created_at` and `updated_at`.
+
+Two lines dated 2026-09-03 were known to contain captured shell output rather
+than real ideas. The script doesn't rely on knowing that in advance — it flags
+(instead of imports) any line whose text is blank, or that contains a
+shell-history/path marker (`zsh_history`, `bash_history`, `/home/`), into a
+`flagged_imports` table for manual review, along with any line that doesn't
+even match the `date time text` shape. Nothing flagged is silently dropped —
+you can inspect the full list at any time:
+
+```
+.venv/bin/python -c "
+import dbutil
+with dbutil.connection() as conn:
+    for row in conn.execute('SELECT * FROM flagged_imports'):
+        print(dict(row))
+"
+```
+
+**Re-running it is safe.** Every raw line — imported or flagged — is recorded
+by its exact text in an `import_log` table. Running `migrate.py` again only
+processes lines that are new since the last run (useful since the old system
+keeps capturing to `inbox.md` until you retire it):
+
+```
+.venv/bin/python scripts/migrate.py
+```
+
+Result of the run performed while building this: **7 imported**, **2 flagged**
+(the blank capture and the shell-output line), matching the known data issue
+exactly.
+
+## Confirmation: ~/ideas/ was left alone
+
+`expire.sh`, the `active/queued/archive/horizon` directories, and the old
+`idea-triage.timer` / `idea-horizon-review.timer` systemd units were never
+written to, moved, enabled, disabled, or deleted by anything in this project.
+`migrate.py` only ever opens `inbox.md` for reading.
+
+**One disclosed exception:** while testing the new `idea` CLI during
+development, two commands were run before a PATH/shell-function conflict (see
+below) was fixed, and — because the old `idea()` zsh function was still
+shadowing the new one at that moment — those two test commands appended two
+lines to `~/ideas/inbox.md` instead of hitting the new database as intended:
+
+```
+2026-09-03 09:32 test capture via new CLI
+2026-09-03 09:32 capture while server is stopped
+```
+
+Those lines are harmless (equivalent in spirit to the other test-artifact
+lines already in the file) and are still sitting in `inbox.md` — they were
+**not** removed, since editing that file, even to undo a mistake, is itself a
+write to `~/ideas/`, and this project treats that file as strictly read-only
+going forward. They were also not imported as real ideas into the new
+database (the two corresponding rows were deleted from `ideas` after the
+migration ran). Delete them from `inbox.md` yourself if you'd like, whenever
+you're ready to touch that file.
+
+## Assumptions made while building this
+
+- **`idea()` shell function vs. new `idea` CLI.** In zsh, a shell function
+  named `idea` shadows an executable named `idea` on `PATH`, so simply
+  symlinking the new CLI wasn't enough for `idea "text"` to reach the new
+  database. Per your choice, the old `idea() { ... }` function in `~/.zshrc`
+  was **commented out** (not deleted) with a note on how to restore it. This
+  is the one change outside `~/idea-bank-v2/` and `~/ideas/` made by this
+  project. `~/ideas/inbox.md` and everything else about the old system is
+  unaffected — if you uncomment the function again, it will resume appending
+  to `inbox.md` exactly as before. The other old shell functions
+  (`idea-queue`, `horizon`) were left untouched since they don't collide with
+  anything new.
+- **A persistent server unit.** The brief asked for triage/horizon-review
+  timers that open the GUI, but not for a systemd unit that keeps the server
+  itself running. Since opening a browser tab to `localhost:8420` is only
+  useful if something is listening there, `install.sh` also installs and
+  enables `idea-bank-v2-server.service` (`Type=simple`, restarts on failure,
+  starts at login).
+- **Port 8420.** Chosen arbitrarily to avoid clashing with common local dev
+  ports (3000, 5000, 8000, 8080).
+- **Timestamp format.** Stored as `YYYY-MM-DD HH:MM:SS` (local time, ISO-ish,
+  sortable as text). Migrated rows get `:00` appended to the old system's
+  minute-precision timestamps.
+- **Flattened keyboard navigation.** `j`/`k`/arrows move through all cards in
+  column order (Inbox → Active → Queued → Horizon → Archive), not just within
+  one column, since the brief didn't specify and this keeps a single mental
+  model for "next/previous idea."
+- **Corruption heuristics for migration** are pattern-based (blank text,
+  shell-history/path markers) rather than hardcoded to the two known bad
+  lines, so the script stays useful if `inbox.md` grows more such lines
+  before you retire the old system.
+
+## Project layout
+
+```
+idea-bank-v2/
+  server.py            Flask app: JSON API + serves static/
+  dbutil.py            shared SQLite schema/connection helper
+  static/
+    index.html
+    style.css
+    app.js
+  cli/idea              standalone capture script
+  scripts/
+    expire.py            8-week queued -> archive sweep
+    migrate.py            one-time/re-runnable import from ~/ideas/inbox.md
+  systemd/
+    idea-bank-v2-server.service
+    idea-bank-v2-triage.service / .timer
+    idea-bank-v2-horizon-review.service / .timer
+  install.sh
+  requirements.txt
+  data/                 ideas.db, expire.log (created at runtime)
+```

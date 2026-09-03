@@ -1,0 +1,210 @@
+:root {
+  --bg: #14171c;
+  --panel: #1c2028;
+  --text: #e7e4dd;
+  --text-dim: #8f9198;
+  --border: rgba(231, 228, 221, 0.09);
+  --border-strong: rgba(231, 228, 221, 0.18);
+  --gold: #c9a15b;
+  --teal: #5c8b85;
+  --red: #b0645a;
+
+  --sans: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- top bar ---- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border-strong);
+  flex-shrink: 0;
+}
+
+/* wordmark set in the capture font, not the UI font: this app's whole
+   reason for existing is `idea "text"` at a shell prompt, so the one
+   place we allow ourselves a flourish echoes that command line. */
+.brand {
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: -0.02em;
+  color: var(--gold);
+  flex-shrink: 0;
+}
+
+.brand .prompt {
+  color: var(--text-dim);
+}
+
+.capture-form {
+  flex: 1;
+}
+
+#capture-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 14px;
+  padding: 9px 12px;
+  border-radius: 3px;
+  outline: none;
+}
+
+#capture-input:focus {
+  border-color: var(--gold);
+}
+
+#capture-input::placeholder {
+  color: var(--text-dim);
+}
+
+.help {
+  display: flex;
+  gap: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.help b {
+  font-family: var(--mono);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-right: 4px;
+  font-weight: 500;
+}
+
+/* ---- board ---- */
+
+.board {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: start;
+  min-height: 0;
+}
+
+.column {
+  border-right: 1px solid var(--border);
+  padding: 16px 12px;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.column:last-child {
+  border-right: none;
+}
+
+.column-title {
+  margin: 0 0 12px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  letter-spacing: 0.01em;
+}
+
+.column[data-status="active"] .column-title { color: var(--gold); }
+.column[data-status="queued"] .column-title { color: var(--teal); }
+.column[data-status="horizon"] .column-title { color: var(--teal); }
+.column[data-status="archive"] .column-title { color: var(--red); }
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---- cards ---- */
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 2px solid transparent;
+  border-radius: 3px;
+  padding: 10px 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.card[data-status="active"] { border-left-color: var(--gold); }
+.card[data-status="queued"] { border-left-color: var(--teal); }
+.card[data-status="horizon"] { border-left-color: var(--teal); }
+.card[data-status="archive"] { border-left-color: var(--red); }
+
+.card.selected {
+  border-color: var(--gold);
+  background: #22262f;
+}
+
+.card-text {
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: var(--text);
+  margin-bottom: 8px;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+}
+
+.card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.card-status-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid var(--border-strong);
+}
+
+.card[data-status="inbox"] .card-status-tag { color: var(--text-dim); }
+.card[data-status="active"] .card-status-tag { color: var(--gold); border-color: var(--gold); }
+.card[data-status="queued"] .card-status-tag { color: var(--teal); border-color: var(--teal); }
+.card[data-status="horizon"] .card-status-tag { color: var(--teal); border-color: var(--teal); }
+.card[data-status="archive"] .card-status-tag { color: var(--red); border-color: var(--red); }
+
+.empty-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.5;
+  padding: 4px 2px;
+}
+
+/* the one deliberate motion moment -- a card sliding into place when it
+   changes column -- is driven from app.js via the FLIP technique. It
+   checks prefers-reduced-motion itself and skips the animation there,
+   so no motion-related rule is needed in this stylesheet. */

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>idea bank</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><span class="prompt">$</span> idea</div>
+  <form id="capture-form" class="capture-form" autocomplete="off">
+    <input
+      id="capture-input"
+      type="text"
+      placeholder="capture an idea and hit enter..."
+      autofocus
+    >
+  </form>
+  <div class="help">
+    <span><b>j/k</b> move</span>
+    <span><b>a</b> active</span>
+    <span><b>q</b> queued</span>
+    <span><b>h</b> horizon</span>
+    <span><b>x</b> archive</span>
+  </div>
+</header>
+
+<main class="board" id="board">
+  <section class="column" data-status="inbox">
+    <h2 class="column-title">Inbox</h2>
+    <div class="cards" id="cards-inbox"></div>
+  </section>
+  <section class="column" data-status="active">
+    <h2 class="column-title">Active</h2>
+    <div class="cards" id="cards-active"></div>
+  </section>
+  <section class="column" data-status="queued">
+    <h2 class="column-title">Queued</h2>
+    <div class="cards" id="cards-queued"></div>
+  </section>
+  <section class="column" data-status="horizon">
+    <h2 class="column-title">Horizon</h2>
+    <div class="cards" id="cards-horizon"></div>
+  </section>
+  <section class="column" data-status="archive">
+    <h2 class="column-title">Archive</h2>
+    <div class="cards" id="cards-archive"></div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

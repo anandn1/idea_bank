@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""idea-bank-v2 capture/query CLI.
+
+Talks directly to the SQLite database via Python's sqlite3 module, so it
+works whether or not the Flask server (or GUI) is running. Built to be used
+by a human at a keyboard *and* by an AI agent scripting against it:
+
+  - every subcommand takes --json for machine-readable output
+  - exit codes are meaningful: 0 success, 1 "did what you asked, but the
+    target didn't exist / was rejected", 2 bad arguments (argparse default)
+  - `idea --help` and `idea <subcommand> --help` are self-documenting
+
+Run `idea --help` to see all subcommands.
+"""
+import argparse
+import json
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import dbutil  # noqa: E402
+
+STATUS_FLAGS = {
+    "active": ("-a", "--active"),
+    "queued": ("-q", "--queued"),
+    "horizon": ("-H", "--horizon"),
+    "archive": ("-x", "--archive"),
+}
+
+
+def add_status_flags(parser: argparse.ArgumentParser, help_verb: str) -> None:
+    """Add -a/-q/-H/-x plus --status as a mutually exclusive group."""
+    group = parser.add_mutually_exclusive_group()
+    for status, flags in STATUS_FLAGS.items():
+        group.add_argument(
+            *flags, dest="status", action="store_const", const=status,
+            help=f"{help_verb} {status}",
+        )
+    group.add_argument(
+        "--status", dest="status", choices=dbutil.STATUSES,
+        help=f"{help_verb} the given status (alternative to -a/-q/-H/-x)",
+    )
+
+
+def add_json_flag(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--json", action="store_true",
+        help="print machine-readable JSON instead of plain text",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="idea",
+        description="Capture and manage ideas in idea-bank-v2's local SQLite database.",
+        epilog=(
+            "Examples:\n"
+            '  idea "ship the migration"        capture straight to inbox\n'
+            '  idea -q "revisit nvim config"     capture straight to queued\n'
+            "  idea list --status inbox         list only inbox ideas\n"
+            "  idea move 12 active               move idea #12 to active\n"
+            '  idea edit 12 "new text"          rewrite idea #12\'s text\n'
+            "  idea delete 12                    delete idea #12\n"
+            "\n"
+            "Bare `idea some text` (no subcommand) is shorthand for `idea capture some text`."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    subparsers = parser.add_subparsers(dest="command", metavar="<command>")
+
+    capture = subparsers.add_parser(
+        "capture", help="add a new idea (default when no subcommand is given)",
+        description="Add a new idea. Defaults to status=inbox.",
+    )
+    capture.add_argument("text", nargs="+", help="the idea text (quote it, or leave unquoted)")
+    add_status_flags(capture, "capture straight into")
+    add_json_flag(capture)
+
+    list_cmd = subparsers.add_parser(
+        "list", help="list ideas, optionally filtered by status",
+        description="List ideas, newest-updated first.",
+    )
+    add_status_flags(list_cmd, "show only")
+    add_json_flag(list_cmd)
+
+    show = subparsers.add_parser(
+        "show", help="show one idea in full",
+        description="Show a single idea's full text, status, and timestamps.",
+    )
+    show.add_argument("id", type=int, help="idea id")
+    add_json_flag(show)
+
+    move = subparsers.add_parser(
+        "move", help="change an idea's status",
+        description="Move an idea to a different status column.",
+    )
+    move.add_argument("id", type=int, help="idea id")
+    move.add_argument("status", choices=dbutil.STATUSES, help="new status")
+    add_json_flag(move)
+
+    edit = subparsers.add_parser(
+        "edit", help="change an idea's text",
+        description="Rewrite an idea's text in place.",
+    )
+    edit.add_argument("id", type=int, help="idea id")
+    edit.add_argument("text", nargs="+", help="new text (quote it, or leave unquoted)")
+    add_json_flag(edit)
+
+    delete = subparsers.add_parser(
+        "delete", help="delete an idea",
+        description="Permanently delete an idea.",
+    )
+    delete.add_argument("id", type=int, help="idea id")
+    add_json_flag(delete)
+
+    return parser
+
+
+def fail(args, message: str) -> int:
+    """Report an error in the right format and return the exit code to use."""
+    if args.json:
+        print(json.dumps({"error": message}))
+    else:
+        print(f"error: {message}", file=sys.stderr)
+    return 1
+
+
+def emit_idea(args, idea: dict, human_verb: str) -> None:
+    if args.json:
+        print(json.dumps(idea))
+    else:
+        print(f"{human_verb} idea #{idea['id']} [{idea['status']}]: {idea['text']}")
+
+
+def cmd_capture(args) -> int:
+    text = " ".join(args.text).strip()
+    if not text:
+        return fail(args, "idea text cannot be empty")
+    status = args.status or "inbox"
+    idea_id = dbutil.add_idea(text, status=status)
+    with dbutil.connection() as conn:
+        emit_idea(args, dbutil.get_idea(conn, idea_id), "captured")
+    return 0
+
+
+def cmd_list(args) -> int:
+    query = f"SELECT {dbutil.IDEA_COLUMNS} FROM ideas"
+    params = ()
+    if args.status:
+        query += " WHERE status = ?"
+        params = (args.status,)
+    query += " ORDER BY updated_at DESC"
+
+    with dbutil.connection() as conn:
+        ideas = [dict(row) for row in conn.execute(query, params)]
+
+    if args.json:
+        print(json.dumps(ideas))
+        return 0
+
+    if not ideas:
+        print("no ideas found")
+        return 0
+    for idea in ideas:
+        preview = idea["text"] if len(idea["text"]) <= 70 else idea["text"][:67] + "..."
+        print(f"#{idea['id']:<4} [{idea['status']:<7}] {preview}  ({idea['updated_at']})")
+    return 0
+
+
+def cmd_show(args) -> int:
+    with dbutil.connection() as conn:
+        idea = dbutil.get_idea(conn, args.id)
+    if idea is None:
+        return fail(args, f"no idea with id {args.id}")
+    if args.json:
+        print(json.dumps(idea))
+        return 0
+    print(f"#{idea['id']} [{idea['status']}]")
+    print(idea["text"])
+    print(f"created: {idea['created_at']}")
+    print(f"updated: {idea['updated_at']}")
+    if idea["notes"]:
+        print(f"notes: {idea['notes']}")
+    return 0
+
+
+def cmd_move(args) -> int:
+    with dbutil.connection() as conn:
+        if dbutil.get_idea(conn, args.id) is None:
+            return fail(args, f"no idea with id {args.id}")
+        conn.execute(
+            "UPDATE ideas SET status = ?, updated_at = ? WHERE id = ?",
+            (args.status, dbutil.now_str(), args.id),
+        )
+        conn.commit()
+        emit_idea(args, dbutil.get_idea(conn, args.id), "moved")
+    return 0
+
+
+def cmd_edit(args) -> int:
+    text = " ".join(args.text).strip()
+    if not text:
+        return fail(args, "idea text cannot be empty")
+    with dbutil.connection() as conn:
+        if dbutil.get_idea(conn, args.id) is None:
+            return fail(args, f"no idea with id {args.id}")
+        conn.execute(
+            "UPDATE ideas SET text = ?, updated_at = ? WHERE id = ?",
+            (text, dbutil.now_str(), args.id),
+        )
+        conn.commit()
+        emit_idea(args, dbutil.get_idea(conn, args.id), "edited")
+    return 0
+
+
+def cmd_delete(args) -> int:
+    with dbutil.connection() as conn:
+        if dbutil.get_idea(conn, args.id) is None:
+            return fail(args, f"no idea with id {args.id}")
+        conn.execute("DELETE FROM ideas WHERE id = ?", (args.id,))
+        conn.commit()
+    if args.json:
+        print(json.dumps({"deleted": True, "id": args.id}))
+    else:
+        print(f"deleted idea #{args.id}")
+    return 0
+
+
+COMMANDS = {
+    "capture": cmd_capture,
+    "list": cmd_list,
+    "show": cmd_show,
+    "move": cmd_move,
+    "edit": cmd_edit,
+    "delete": cmd_delete,
+}
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    # bare `idea some text` (no recognized subcommand) is shorthand for
+    # `idea capture some text`, matching the old shell function's usage.
+    if argv and argv[0] not in COMMANDS and argv[0] not in ("-h", "--help"):
+        argv = ["capture", *argv]
+    elif not argv:
+        argv = ["--help"]
+
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return COMMANDS[args.command](args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

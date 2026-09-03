@@ -1,0 +1,11 @@
+[Unit]
+Description=idea-bank-v2 local web server
+
+[Service]
+Type=simple
+ExecStart=%h/idea-bank-v2/.venv/bin/python %h/idea-bank-v2/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

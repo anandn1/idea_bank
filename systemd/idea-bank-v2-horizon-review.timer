@@ -1,0 +1,9 @@
+[Unit]
+Description=Quarterly idea-bank-v2 horizon review
+
+[Timer]
+OnCalendar=*-01,04,07,10-01 10:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

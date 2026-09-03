@@ -1,0 +1,6 @@
+[Unit]
+Description=idea-bank-v2 quarterly horizon review
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash -c '/usr/bin/xdg-open "http://127.0.0.1:8420/#horizon" || /usr/bin/notify-send "Horizon review" "Open http://127.0.0.1:8420/#horizon"'
