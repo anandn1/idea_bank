@@ -38,16 +38,16 @@ STATUS_DESCRIPTIONS = {
 }
 
 
-def add_status_flags(parser: argparse.ArgumentParser, help_verb: str) -> None:
+def add_status_flags(parser: argparse.ArgumentParser, help_verb: str, dest: str = "status") -> None:
     """Add -a/-q/-H/-x plus --status as a mutually exclusive group."""
     group = parser.add_mutually_exclusive_group()
     for status, flags in STATUS_FLAGS.items():
         group.add_argument(
-            *flags, dest="status", action="store_const", const=status,
+            *flags, dest=dest, action="store_const", const=status,
             help=f"{help_verb} {status} ({STATUS_DESCRIPTIONS[status]})",
         )
     group.add_argument(
-        "--status", dest="status", choices=dbutil.STATUSES,
+        "--status", dest=dest, choices=dbutil.STATUSES,
         help=f"{help_verb} the given status (alternative to -a/-q/-H/-x)",
     )
 
@@ -57,6 +57,42 @@ def add_json_flag(parser: argparse.ArgumentParser) -> None:
         "--json", action="store_true",
         help="print machine-readable JSON instead of plain text",
     )
+
+
+def parse_ids_and_status(
+    tokens: list[str], status_flag: str | None
+) -> tuple[list[int], str] | tuple[None, str]:
+    """Split move's raw positional tokens into (ids, status).
+
+    The target status can be a trailing word (e.g. `12 13 active`) or come
+    from a flag (`12 13 -x`), but not both. argparse can't express "ids
+    (unbounded) then an optional trailing status" on its own -- a greedy
+    nargs='+' swallows a following optional positional entirely -- so
+    `move`'s ids argument is parsed as raw strings and split out here
+    instead. Returns (None, error_message) on any problem.
+    """
+    trailing_is_status = bool(tokens) and tokens[-1] in dbutil.STATUSES
+
+    if status_flag and trailing_is_status:
+        return None, "specify the target status only once: a trailing word or a flag, not both"
+    if status_flag:
+        id_tokens, status = tokens, status_flag
+    elif trailing_is_status:
+        id_tokens, status = tokens[:-1], tokens[-1]
+    else:
+        return None, (
+            "missing target status: give it as a trailing word (e.g. 'active') "
+            "or a flag (-a/-q/-H/-x/--status)"
+        )
+
+    if not id_tokens:
+        return None, "no idea id(s) given"
+    ids = []
+    for token in id_tokens:
+        if not token.isdigit():
+            return None, f"invalid idea id: {token!r}"
+        ids.append(int(token))
+    return ids, status
 
 
 def missing_ids(conn, ids: list[int]) -> list[int]:
@@ -92,6 +128,7 @@ def build_epilog() -> str:
         "  idea list -q                      list only queued\n"
         "  idea move 12 active               move idea #12 to active\n"
         "  idea move 12 13 14 active         move several ideas to active at once\n"
+        "  idea move 12 13 14 -x             ...or with a status flag instead\n"
         "  idea delete 12 13 14              delete several ideas at once\n"
         '  idea edit 12 "new text"          rewrite idea #12\'s text\n'
         "  idea delete 12                    delete idea #12\n"
@@ -147,12 +184,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     move = subparsers.add_parser(
         "move", help="change the status of one or more ideas",
-        description="Move one or more ideas to a different status column.",
+        description=(
+            "Move one or more ideas to a different status column. Give the "
+            "target status as a trailing word, or with -a/-q/-H/-x/--status."
+        ),
         epilog=f"Statuses:\n{status_description_lines()}",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    move.add_argument("ids", type=int, nargs="+", metavar="id", help="idea id(s)")
-    move.add_argument("status", choices=dbutil.STATUSES, help="new status")
+    move.add_argument(
+        "ids", nargs="+", metavar="id",
+        help="idea id(s), optionally followed by the target status as a trailing word",
+    )
+    add_status_flags(move, "move to", dest="status_flag")
     add_json_flag(move)
 
     edit = subparsers.add_parser(
@@ -280,17 +323,21 @@ def cmd_show(args) -> int:
 
 
 def cmd_move(args) -> int:
+    ids, status = parse_ids_and_status(args.ids, args.status_flag)
+    if ids is None:
+        return fail(args, status)  # status holds the error message here
+
     with dbutil.connection() as conn:
-        missing = missing_ids(conn, args.ids)
+        missing = missing_ids(conn, ids)
         if missing:
             return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
         now = dbutil.now_str()
         conn.executemany(
             "UPDATE ideas SET status = ?, updated_at = ? WHERE id = ?",
-            [(args.status, now, idea_id) for idea_id in args.ids],
+            [(status, now, idea_id) for idea_id in ids],
         )
         conn.commit()
-        ideas = [dbutil.get_idea(conn, idea_id) for idea_id in args.ids]
+        ideas = [dbutil.get_idea(conn, idea_id) for idea_id in ids]
     emit_ideas(args, ideas, "moved")
     return 0
 
