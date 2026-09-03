@@ -3,5 +3,5 @@ Description=idea-bank-v2 weekly triage: expire stale queued ideas, then open the
 
 [Service]
 Type=oneshot
-ExecStart=%h/idea-bank-v2/.venv/bin/python %h/idea-bank-v2/scripts/expire.py
+ExecStart=%h/idea_bank/.venv/bin/python %h/idea_bank/scripts/expire.py
 ExecStartPost=/usr/bin/xdg-open http://127.0.0.1:8420/

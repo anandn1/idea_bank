@@ -59,6 +59,31 @@ def add_json_flag(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_field_flag(parser: argparse.ArgumentParser, help_extra: str = "") -> None:
+    parser.add_argument(
+        "--field", dest="fields", action="append", metavar="key=value",
+        help=(
+            "set a structured field (repeatable), e.g. --field priority=high. "
+            f"Purely optional -- ignore it and nothing changes.{help_extra}"
+        ),
+    )
+
+
+def parse_field_args(raw: list[str] | None) -> tuple[dict, None] | tuple[None, str]:
+    """Parse repeated --field key=value into a dict. Returns (None, error)
+    on a malformed one."""
+    fields: dict[str, str] = {}
+    for item in raw or []:
+        if "=" not in item:
+            return None, f"invalid --field {item!r}: expected key=value"
+        key, _, value = item.partition("=")
+        key = key.strip()
+        if not key:
+            return None, f"invalid --field {item!r}: empty key"
+        fields[key] = value
+    return fields, None
+
+
 def parse_ids_and_status(
     tokens: list[str], status_flag: str | None
 ) -> tuple[list[int], str] | tuple[None, str]:
@@ -135,6 +160,12 @@ def build_epilog() -> str:
         '  printf "one\\ntwo\\n" | idea capture --stdin -q\n'
         "                                    bulk-capture one idea per line, all -> queued\n"
         "\n"
+        "Structured fields (fully optional -- ignore them and nothing changes):\n"
+        '  idea "book a room" --field due=2026-10-01 --field priority=high\n'
+        "  idea edit 12 --field owner=me       add/overwrite a field, text unchanged\n"
+        "  idea edit 12 --unset-field owner    remove a field\n"
+        "  idea show 12                        prints fields if the idea has any\n"
+        "\n"
         "Bare `idea some text` (no subcommand) is shorthand for `idea capture some text`.\n"
         "move/delete/show accept multiple ids in one call. Run `idea <command> --help`\n"
         "for a command's full flag list, e.g. `idea capture --help`."
@@ -166,6 +197,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="bulk-capture: read one idea per line from standard input",
     )
     add_status_flags(capture, "capture straight into")
+    add_field_flag(capture, " With --stdin, the same fields apply to every line.")
     add_json_flag(capture)
 
     list_cmd = subparsers.add_parser(
@@ -199,11 +231,22 @@ def build_parser() -> argparse.ArgumentParser:
     add_json_flag(move)
 
     edit = subparsers.add_parser(
-        "edit", help="change an idea's text",
-        description="Rewrite a single idea's text in place.",
+        "edit", help="change an idea's text and/or its structured fields",
+        description=(
+            "Rewrite a single idea's text and/or set/unset its structured fields "
+            "in place. Text is optional here -- omit it to only change fields."
+        ),
     )
     edit.add_argument("id", type=int, help="idea id")
-    edit.add_argument("text", nargs="+", help="new text (quote it, or leave unquoted)")
+    edit.add_argument(
+        "text", nargs="*",
+        help="new text (quote it, or leave unquoted); omit to leave text unchanged",
+    )
+    add_field_flag(edit)
+    edit.add_argument(
+        "--unset-field", dest="unset_fields", action="append", metavar="key",
+        help="remove a structured field (repeatable)",
+    )
     add_json_flag(edit)
 
     delete = subparsers.add_parser(
@@ -248,6 +291,9 @@ def emit_ideas(args, ideas: list[dict], human_verb: str) -> None:
 
 def cmd_capture(args) -> int:
     status = args.status or "inbox"
+    fields, err = parse_field_args(args.fields)
+    if err:
+        return fail(args, err)
 
     if args.stdin:
         if args.text:
@@ -258,7 +304,7 @@ def cmd_capture(args) -> int:
         ideas = []
         with dbutil.connection() as conn:
             for text in texts:
-                idea_id = dbutil.add_idea(text, status=status)
+                idea_id = dbutil.add_idea(text, status=status, fields=fields)
                 ideas.append(dbutil.get_idea(conn, idea_id))
         if args.json:
             print(json.dumps(ideas))
@@ -270,7 +316,7 @@ def cmd_capture(args) -> int:
     text = " ".join(args.text).strip()
     if not text:
         return fail(args, "idea text cannot be empty (pass text, or use --stdin)")
-    idea_id = dbutil.add_idea(text, status=status)
+    idea_id = dbutil.add_idea(text, status=status, fields=fields)
     with dbutil.connection() as conn:
         emit_idea(args, dbutil.get_idea(conn, idea_id), "captured")
     return 0
@@ -285,7 +331,7 @@ def cmd_list(args) -> int:
     query += " ORDER BY updated_at DESC"
 
     with dbutil.connection() as conn:
-        ideas = [dict(row) for row in conn.execute(query, params)]
+        ideas = [dbutil.row_to_idea(row) for row in conn.execute(query, params)]
 
     if args.json:
         print(json.dumps(ideas))
@@ -296,7 +342,10 @@ def cmd_list(args) -> int:
         return 0
     for idea in ideas:
         preview = idea["text"] if len(idea["text"]) <= 70 else idea["text"][:67] + "..."
-        print(f"#{idea['id']:<4} [{idea['status']:<7}] {preview}  ({idea['updated_at']})")
+        marker = "*" if idea["fields"] else " "
+        print(f"#{idea['id']:<4} [{idea['status']:<7}]{marker}{preview}  ({idea['updated_at']})")
+    if any(idea["fields"] for idea in ideas):
+        print("\n* has structured fields -- see `idea show <id>`")
     return 0
 
 
@@ -319,6 +368,10 @@ def cmd_show(args) -> int:
         print(f"updated: {idea['updated_at']}")
         if idea["notes"]:
             print(f"notes: {idea['notes']}")
+        if idea["fields"]:
+            print("fields:")
+            for key, value in idea["fields"].items():
+                print(f"  {key}: {value}")
     return 0
 
 
@@ -343,16 +396,37 @@ def cmd_move(args) -> int:
 
 
 def cmd_edit(args) -> int:
-    text = " ".join(args.text).strip()
-    if not text:
-        return fail(args, "idea text cannot be empty")
+    text = " ".join(args.text).strip() if args.text else None
+    field_updates, err = parse_field_args(args.fields)
+    if err:
+        return fail(args, err)
+    unset_fields = args.unset_fields or []
+
+    if text is None and not field_updates and not unset_fields:
+        return fail(args, "nothing to change: pass new text, --field, and/or --unset-field")
+
     with dbutil.connection() as conn:
-        if dbutil.get_idea(conn, args.id) is None:
+        idea = dbutil.get_idea(conn, args.id)
+        if idea is None:
             return fail(args, f"no idea with id {args.id}")
-        conn.execute(
-            "UPDATE ideas SET text = ?, updated_at = ? WHERE id = ?",
-            (text, dbutil.now_str(), args.id),
-        )
+
+        set_clauses, values = ["updated_at = ?"], [dbutil.now_str()]
+
+        if text is not None:
+            if not text:
+                return fail(args, "idea text cannot be empty")
+            set_clauses.append("text = ?")
+            values.append(text)
+
+        if field_updates or unset_fields:
+            merged = {**idea["fields"], **field_updates}
+            for key in unset_fields:
+                merged.pop(key, None)
+            set_clauses.append("fields = ?")
+            values.append(dbutil.encode_fields(merged))
+
+        values.append(args.id)
+        conn.execute(f"UPDATE ideas SET {', '.join(set_clauses)} WHERE id = ?", values)
         conn.commit()
         emit_idea(args, dbutil.get_idea(conn, args.id), "edited")
     return 0

@@ -3,7 +3,7 @@ Description=idea-bank-v2 local web server
 
 [Service]
 Type=simple
-ExecStart=%h/idea-bank-v2/.venv/bin/python %h/idea-bank-v2/server.py
+ExecStart=%h/idea_bank/.venv/bin/python %h/idea_bank/server.py
 Restart=on-failure
 RestartSec=5
 

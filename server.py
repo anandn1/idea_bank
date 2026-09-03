@@ -1,4 +1,4 @@
-"""idea-bank-v2 Flask server: JSON API + static single-page GUI."""
+"""idea-bank-v2 Flask server: JSON API + serves the single-page GUI."""
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -20,7 +20,7 @@ def list_ideas():
         rows = conn.execute(
             f"SELECT {dbutil.IDEA_COLUMNS} FROM ideas ORDER BY updated_at DESC"
         ).fetchall()
-        return jsonify([dict(row) for row in rows])
+        return jsonify([dbutil.row_to_idea(row) for row in rows])
 
 
 @app.post("/api/ideas")
@@ -30,7 +30,15 @@ def create_idea():
     if not text:
         return jsonify({"error": "text is required"}), 400
 
-    idea_id = dbutil.add_idea(text, status="inbox")
+    status = payload.get("status", "inbox")
+    if status not in dbutil.STATUSES:
+        return jsonify({"error": f"invalid status: {status}"}), 400
+
+    idea_fields = payload.get("fields")
+    if idea_fields is not None and not isinstance(idea_fields, dict):
+        return jsonify({"error": "fields must be an object"}), 400
+
+    idea_id = dbutil.add_idea(text, status=status, fields=idea_fields)
     with dbutil.connection() as conn:
         return jsonify(dbutil.get_idea(conn, idea_id)), 201
 
@@ -42,34 +50,41 @@ def update_idea(idea_id):
         if dbutil.get_idea(conn, idea_id) is None:
             return jsonify({"error": "not found"}), 404
 
-        fields, values = [], []
+        set_clauses, values = [], []
 
         if "status" in payload:
             status = payload["status"]
             if status not in dbutil.STATUSES:
                 return jsonify({"error": f"invalid status: {status}"}), 400
-            fields.append("status = ?")
+            set_clauses.append("status = ?")
             values.append(status)
 
         if "text" in payload:
             text = (payload["text"] or "").strip()
             if not text:
                 return jsonify({"error": "text cannot be empty"}), 400
-            fields.append("text = ?")
+            set_clauses.append("text = ?")
             values.append(text)
 
         if "notes" in payload:
-            fields.append("notes = ?")
+            set_clauses.append("notes = ?")
             values.append(payload["notes"])
 
-        if not fields:
+        if "fields" in payload:
+            idea_fields = payload["fields"]
+            if idea_fields is not None and not isinstance(idea_fields, dict):
+                return jsonify({"error": "fields must be an object"}), 400
+            set_clauses.append("fields = ?")
+            values.append(dbutil.encode_fields(idea_fields))
+
+        if not set_clauses:
             return jsonify({"error": "no updatable fields provided"}), 400
 
-        fields.append("updated_at = ?")
+        set_clauses.append("updated_at = ?")
         values.append(dbutil.now_str())
         values.append(idea_id)
 
-        conn.execute(f"UPDATE ideas SET {', '.join(fields)} WHERE id = ?", values)
+        conn.execute(f"UPDATE ideas SET {', '.join(set_clauses)} WHERE id = ?", values)
         conn.commit()
 
         return jsonify(dbutil.get_idea(conn, idea_id))
