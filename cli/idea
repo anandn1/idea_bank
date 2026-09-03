@@ -51,21 +51,34 @@ def add_json_flag(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def build_epilog() -> str:
+    status_lines = "\n".join(
+        f"  {status:<8} {'/'.join(STATUS_FLAGS[status]) if status in STATUS_FLAGS else '(default, no flag needed)'}"
+        for status in dbutil.STATUSES
+    )
+    return (
+        "Statuses (and their capture/list shortcut flags):\n"
+        f"{status_lines}\n"
+        "\n"
+        "Examples:\n"
+        '  idea "ship the migration"        capture straight to inbox\n'
+        '  idea -q "revisit nvim config"     capture straight to queued\n'
+        "  idea list --status inbox         list only inbox ideas\n"
+        "  idea list -q                      list only queued\n"
+        "  idea move 12 active               move idea #12 to active\n"
+        '  idea edit 12 "new text"          rewrite idea #12\'s text\n'
+        "  idea delete 12                    delete idea #12\n"
+        "\n"
+        "Bare `idea some text` (no subcommand) is shorthand for `idea capture some text`.\n"
+        "Run `idea <command> --help` for a command's full flag list, e.g. `idea capture --help`."
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="idea",
         description="Capture and manage ideas in idea-bank-v2's local SQLite database.",
-        epilog=(
-            "Examples:\n"
-            '  idea "ship the migration"        capture straight to inbox\n'
-            '  idea -q "revisit nvim config"     capture straight to queued\n'
-            "  idea list --status inbox         list only inbox ideas\n"
-            "  idea move 12 active               move idea #12 to active\n"
-            '  idea edit 12 "new text"          rewrite idea #12\'s text\n'
-            "  idea delete 12                    delete idea #12\n"
-            "\n"
-            "Bare `idea some text` (no subcommand) is shorthand for `idea capture some text`."
-        ),
+        epilog=build_epilog(),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
