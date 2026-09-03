@@ -59,6 +59,16 @@ def add_json_flag(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def missing_ids(conn, ids: list[int]) -> list[int]:
+    """Return the subset of ids that don't exist, preserving input order."""
+    placeholders = ",".join("?" * len(ids))
+    found = {
+        row["id"]
+        for row in conn.execute(f"SELECT id FROM ideas WHERE id IN ({placeholders})", ids)
+    }
+    return [i for i in ids if i not in found]
+
+
 def status_description_lines() -> str:
     return "\n".join(
         f"  {status:<8} {STATUS_DESCRIPTIONS[status]}" for status in dbutil.STATUSES
@@ -81,11 +91,16 @@ def build_epilog() -> str:
         "  idea list --status inbox         list only inbox ideas\n"
         "  idea list -q                      list only queued\n"
         "  idea move 12 active               move idea #12 to active\n"
+        "  idea move 12 13 14 active         move several ideas to active at once\n"
+        "  idea delete 12 13 14              delete several ideas at once\n"
         '  idea edit 12 "new text"          rewrite idea #12\'s text\n'
         "  idea delete 12                    delete idea #12\n"
+        '  printf "one\\ntwo\\n" | idea capture --stdin -q\n'
+        "                                    bulk-capture one idea per line, all -> queued\n"
         "\n"
         "Bare `idea some text` (no subcommand) is shorthand for `idea capture some text`.\n"
-        "Run `idea <command> --help` for a command's full flag list, e.g. `idea capture --help`."
+        "move/delete/show accept multiple ids in one call. Run `idea <command> --help`\n"
+        "for a command's full flag list, e.g. `idea capture --help`."
     )
 
 
@@ -100,9 +115,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     capture = subparsers.add_parser(
         "capture", help="add a new idea (default when no subcommand is given)",
-        description="Add a new idea. Defaults to status=inbox.",
+        description=(
+            "Add a new idea (status=inbox by default). With --stdin, add one idea "
+            "per non-empty line of standard input instead, for bulk capture."
+        ),
     )
-    capture.add_argument("text", nargs="+", help="the idea text (quote it, or leave unquoted)")
+    capture.add_argument(
+        "text", nargs="*",
+        help="the idea text (quote it, or leave unquoted); omit when using --stdin",
+    )
+    capture.add_argument(
+        "--stdin", action="store_true",
+        help="bulk-capture: read one idea per line from standard input",
+    )
     add_status_flags(capture, "capture straight into")
     add_json_flag(capture)
 
@@ -114,35 +139,35 @@ def build_parser() -> argparse.ArgumentParser:
     add_json_flag(list_cmd)
 
     show = subparsers.add_parser(
-        "show", help="show one idea in full",
-        description="Show a single idea's full text, status, and timestamps.",
+        "show", help="show one or more ideas in full",
+        description="Show one or more ideas' full text, status, and timestamps.",
     )
-    show.add_argument("id", type=int, help="idea id")
+    show.add_argument("ids", type=int, nargs="+", metavar="id", help="idea id(s)")
     add_json_flag(show)
 
     move = subparsers.add_parser(
-        "move", help="change an idea's status",
-        description="Move an idea to a different status column.",
+        "move", help="change the status of one or more ideas",
+        description="Move one or more ideas to a different status column.",
         epilog=f"Statuses:\n{status_description_lines()}",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    move.add_argument("id", type=int, help="idea id")
+    move.add_argument("ids", type=int, nargs="+", metavar="id", help="idea id(s)")
     move.add_argument("status", choices=dbutil.STATUSES, help="new status")
     add_json_flag(move)
 
     edit = subparsers.add_parser(
         "edit", help="change an idea's text",
-        description="Rewrite an idea's text in place.",
+        description="Rewrite a single idea's text in place.",
     )
     edit.add_argument("id", type=int, help="idea id")
     edit.add_argument("text", nargs="+", help="new text (quote it, or leave unquoted)")
     add_json_flag(edit)
 
     delete = subparsers.add_parser(
-        "delete", help="delete an idea",
-        description="Permanently delete an idea.",
+        "delete", help="delete one or more ideas",
+        description="Permanently delete one or more ideas.",
     )
-    delete.add_argument("id", type=int, help="idea id")
+    delete.add_argument("ids", type=int, nargs="+", metavar="id", help="idea id(s)")
     add_json_flag(delete)
 
     return parser
@@ -164,11 +189,44 @@ def emit_idea(args, idea: dict, human_verb: str) -> None:
         print(f"{human_verb} idea #{idea['id']} [{idea['status']}]: {idea['text']}")
 
 
+def emit_ideas(args, ideas: list[dict], human_verb: str) -> None:
+    """Like emit_idea, but for a batch: a single result still prints as a
+    single object/line (so existing single-id usage is unchanged), while
+    more than one prints as a JSON array / one line each."""
+    if len(ideas) == 1:
+        emit_idea(args, ideas[0], human_verb)
+        return
+    if args.json:
+        print(json.dumps(ideas))
+    else:
+        for idea in ideas:
+            print(f"{human_verb} idea #{idea['id']} [{idea['status']}]: {idea['text']}")
+
+
 def cmd_capture(args) -> int:
+    status = args.status or "inbox"
+
+    if args.stdin:
+        if args.text:
+            return fail(args, "don't pass idea text as arguments together with --stdin")
+        texts = [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]
+        if not texts:
+            return fail(args, "no non-empty lines read from stdin")
+        ideas = []
+        with dbutil.connection() as conn:
+            for text in texts:
+                idea_id = dbutil.add_idea(text, status=status)
+                ideas.append(dbutil.get_idea(conn, idea_id))
+        if args.json:
+            print(json.dumps(ideas))
+        else:
+            for idea in ideas:
+                print(f"captured idea #{idea['id']} [{idea['status']}]: {idea['text']}")
+        return 0
+
     text = " ".join(args.text).strip()
     if not text:
-        return fail(args, "idea text cannot be empty")
-    status = args.status or "inbox"
+        return fail(args, "idea text cannot be empty (pass text, or use --stdin)")
     idea_id = dbutil.add_idea(text, status=status)
     with dbutil.connection() as conn:
         emit_idea(args, dbutil.get_idea(conn, idea_id), "captured")
@@ -201,31 +259,39 @@ def cmd_list(args) -> int:
 
 def cmd_show(args) -> int:
     with dbutil.connection() as conn:
-        idea = dbutil.get_idea(conn, args.id)
-    if idea is None:
-        return fail(args, f"no idea with id {args.id}")
+        missing = missing_ids(conn, args.ids)
+        if missing:
+            return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
+        ideas = [dbutil.get_idea(conn, idea_id) for idea_id in args.ids]
+
     if args.json:
-        print(json.dumps(idea))
+        print(json.dumps(ideas[0] if len(ideas) == 1 else ideas))
         return 0
-    print(f"#{idea['id']} [{idea['status']}]")
-    print(idea["text"])
-    print(f"created: {idea['created_at']}")
-    print(f"updated: {idea['updated_at']}")
-    if idea["notes"]:
-        print(f"notes: {idea['notes']}")
+    for i, idea in enumerate(ideas):
+        if i > 0:
+            print()
+        print(f"#{idea['id']} [{idea['status']}]")
+        print(idea["text"])
+        print(f"created: {idea['created_at']}")
+        print(f"updated: {idea['updated_at']}")
+        if idea["notes"]:
+            print(f"notes: {idea['notes']}")
     return 0
 
 
 def cmd_move(args) -> int:
     with dbutil.connection() as conn:
-        if dbutil.get_idea(conn, args.id) is None:
-            return fail(args, f"no idea with id {args.id}")
-        conn.execute(
+        missing = missing_ids(conn, args.ids)
+        if missing:
+            return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
+        now = dbutil.now_str()
+        conn.executemany(
             "UPDATE ideas SET status = ?, updated_at = ? WHERE id = ?",
-            (args.status, dbutil.now_str(), args.id),
+            [(args.status, now, idea_id) for idea_id in args.ids],
         )
         conn.commit()
-        emit_idea(args, dbutil.get_idea(conn, args.id), "moved")
+        ideas = [dbutil.get_idea(conn, idea_id) for idea_id in args.ids]
+    emit_ideas(args, ideas, "moved")
     return 0
 
 
@@ -247,14 +313,18 @@ def cmd_edit(args) -> int:
 
 def cmd_delete(args) -> int:
     with dbutil.connection() as conn:
-        if dbutil.get_idea(conn, args.id) is None:
-            return fail(args, f"no idea with id {args.id}")
-        conn.execute("DELETE FROM ideas WHERE id = ?", (args.id,))
+        missing = missing_ids(conn, args.ids)
+        if missing:
+            return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
+        conn.executemany("DELETE FROM ideas WHERE id = ?", [(i,) for i in args.ids])
         conn.commit()
+
     if args.json:
-        print(json.dumps({"deleted": True, "id": args.id}))
+        results = [{"deleted": True, "id": i} for i in args.ids]
+        print(json.dumps(results[0] if len(results) == 1 else results))
     else:
-        print(f"deleted idea #{args.id}")
+        for idea_id in args.ids:
+            print(f"deleted idea #{idea_id}")
     return 0
 
 

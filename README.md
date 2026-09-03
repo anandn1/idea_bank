@@ -52,9 +52,21 @@ idea list --json                   # machine-readable, for scripting/agents
 
 idea show 12                       # full detail for one idea
 idea move 12 active --json         # change status, print the updated idea as JSON
-idea edit 12 "new text"            # rewrite text
+idea edit 12 "new text"            # rewrite text (single idea only)
 idea delete 12                     # delete
+
+# batch: show / move / delete all take multiple ids
+idea move 12 13 14 active          # move several ideas to active in one call
+idea delete 12 13 14               # delete several ideas in one call
+idea show 12 13 14 --json          # -> JSON array when more than one id is given
+
+# batch capture: one idea per non-empty line of stdin
+printf "idea one\nidea two\n" | idea capture --stdin -q
 ```
+
+If any id in a batch `move`/`delete`/`show` doesn't exist, the whole call
+fails (nothing is changed) and reports which id(s) were missing -- so a
+partial id list never leaves things half-moved.
 
 Note: `-h` is reserved for `--help` (argparse's default), which is why the
 horizon shortcut is uppercase `-H` — everywhere else in this project
