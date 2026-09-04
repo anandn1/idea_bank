@@ -61,7 +61,8 @@ body {
 }
 
 .capture-form {
-  flex: 1;
+  flex: 1 1 180px;
+  min-width: 180px;
 }
 
 #capture-input {
@@ -108,8 +109,62 @@ body {
 
 .target-pill[data-status="active"].selected { color: var(--gold); border-color: var(--gold); }
 .target-pill[data-status="queued"].selected,
-.target-pill[data-status="horizon"].selected { color: var(--teal); border-color: var(--teal); }
+.target-pill[data-status="horizon"].selected,
+.target-pill[data-status="frontier"].selected { color: var(--teal); border-color: var(--teal); }
 .target-pill[data-status="archive"].selected { color: var(--red); border-color: var(--red); }
+
+/* ---- daily goal readout: subtle, same palette, no new colors ---- */
+
+.goal-readout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  padding: 4px 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.goal-streak.active {
+  color: var(--gold);
+}
+
+.goal-today {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.goal-bar {
+  display: inline-block;
+  width: 40px;
+  height: 4px;
+  background: var(--border-strong);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.goal-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--gold);
+  transition: width 220ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .goal-bar-fill {
+    transition: none;
+  }
+}
+
+.goal-today[hidden] {
+  display: none;
+}
 
 .mode-indicator {
   font-family: var(--mono);
@@ -151,7 +206,7 @@ body {
 .board {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   min-height: 0;
 }
 
@@ -180,6 +235,7 @@ body {
 .column[data-status="active"] .column-title { color: var(--gold); }
 .column[data-status="queued"] .column-title { color: var(--teal); }
 .column[data-status="horizon"] .column-title { color: var(--teal); }
+.column[data-status="frontier"] .column-title { color: var(--teal); opacity: 0.7; }
 .column[data-status="archive"] .column-title { color: var(--red); }
 
 .cards {
@@ -208,6 +264,7 @@ body {
 .card[data-status="active"] { border-left-color: var(--gold); }
 .card[data-status="queued"] { border-left-color: var(--teal); }
 .card[data-status="horizon"] { border-left-color: var(--teal); }
+.card[data-status="frontier"] { border-left-color: rgba(92, 139, 133, 0.55); }
 .card[data-status="archive"] { border-left-color: var(--red); }
 
 .card.selected {
@@ -295,7 +352,34 @@ body {
 .card[data-status="active"] .card-status-tag { color: var(--gold); border-color: var(--gold); }
 .card[data-status="queued"] .card-status-tag { color: var(--teal); border-color: var(--teal); }
 .card[data-status="horizon"] .card-status-tag { color: var(--teal); border-color: var(--teal); }
+.card[data-status="frontier"] .card-status-tag { color: var(--teal); border-color: rgba(92, 139, 133, 0.55); }
 .card[data-status="archive"] .card-status-tag { color: var(--red); border-color: var(--red); }
+
+.goal-marker {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  cursor: pointer;
+  margin-right: 4px;
+}
+
+.goal-marker.tagged {
+  color: var(--teal);
+  border-color: var(--teal);
+}
+
+.goal-marker.done {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
+.goal-marker:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
+}
 
 .empty-hint {
   font-size: 12px;

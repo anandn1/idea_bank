@@ -93,9 +93,49 @@ def update_idea(idea_id):
 @app.delete("/api/ideas/<int:idea_id>")
 def delete_idea(idea_id):
     with dbutil.connection() as conn:
+        dbutil.remove_goals_for_idea(conn, idea_id)
         conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
         conn.commit()
         return "", 204
+
+
+@app.get("/api/goals")
+def list_goals():
+    date = request.args.get("date") or dbutil.today_str()
+    with dbutil.connection() as conn:
+        goals = dbutil.goals_for_date(conn, date)
+        return jsonify({"date": date, "goals": goals})
+
+
+@app.post("/api/goals")
+def create_goal():
+    payload = request.get_json(silent=True) or {}
+    idea_id = payload.get("idea_id")
+    if not isinstance(idea_id, int):
+        return jsonify({"error": "idea_id is required"}), 400
+    date = payload.get("date") or dbutil.today_str()
+
+    with dbutil.connection() as conn:
+        goal = dbutil.add_goal(conn, idea_id, date)
+        if goal is None:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(goal), 201
+
+
+@app.delete("/api/goals/<int:idea_id>")
+def remove_goal_route(idea_id):
+    date = request.args.get("date") or dbutil.today_str()
+    with dbutil.connection() as conn:
+        dbutil.remove_goal(conn, idea_id, date)
+        return "", 204
+
+
+@app.get("/api/goals/streak")
+def goal_streak():
+    with dbutil.connection() as conn:
+        info = dbutil.compute_streak(conn)
+        info["xp"] = dbutil.total_xp(conn)
+        return jsonify(info)
 
 
 if __name__ == "__main__":

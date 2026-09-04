@@ -1,4 +1,4 @@
-const STATUSES = ["inbox", "active", "queued", "horizon", "archive"];
+const STATUSES = ["inbox", "active", "queued", "horizon", "frontier", "archive"];
 
 let ideas = [];
 let flatOrder = [];
@@ -8,6 +8,12 @@ let selectedIds = new Set(); // ids batch actions apply to (always includes focu
 let visualAnchorId = null; // non-null while range-select ("visual") mode is active
 let editingId = null; // id of the card currently being text-edited, if any
 let captureTargetStatus = "inbox";
+
+// idea_id -> today's goal row, if tagged. A goal completes itself the
+// moment its idea's status differs from status_at_tag (see dbutil.py) --
+// the GUI never sets completed_at directly, only tags/untags.
+let goalsToday = new Map();
+let streakInfo = { streak: 0, longest: 0, today_complete: false, today_done: 0, today_total: 0, xp: 0 };
 
 const captureForm = document.getElementById("capture-form");
 const captureInput = document.getElementById("capture-input");
@@ -73,10 +79,22 @@ function buildCard(idea) {
   const time = document.createElement("span");
   time.className = "card-time";
   time.textContent = relativeTime(idea.updated_at);
+
+  const goal = goalsToday.get(idea.id);
+  const goalMarker = document.createElement("span");
+  goalMarker.className = "goal-marker" + (goal ? (goal.completed_at ? " done" : " tagged") : "");
+  goalMarker.textContent = goal ? (goal.completed_at ? "done" : "goal") : "goal";
+  goalMarker.title = goal ? "tagged as today's goal -- click to untag" : "tag as today's goal";
+  goalMarker.addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleGoalForIdea(idea.id);
+  });
+
   const tag = document.createElement("span");
   tag.className = "card-status-tag";
   tag.textContent = idea.status;
   meta.appendChild(time);
+  meta.appendChild(goalMarker);
   meta.appendChild(tag);
   card.appendChild(meta);
 
@@ -242,6 +260,86 @@ async function fetchIdeas() {
   }
 }
 
+// ---- daily goals: subtle streak/xp readout in the top bar ----
+
+async function fetchGoalState() {
+  const [goalsRes, streakRes] = await Promise.all([
+    fetch("/api/goals"),
+    fetch("/api/goals/streak"),
+  ]);
+  const goalsPayload = await goalsRes.json();
+  streakInfo = await streakRes.json();
+  goalsToday = new Map(goalsPayload.goals.map((g) => [g.idea_id, g]));
+  renderGoalReadout();
+  // deliberately doesn't re-render the board here: a status change calls
+  // this mid-FLIP-animation (see moveIdeaAnimated), and rebuilding card DOM
+  // would cut the slide short. Card goal markers pick up the latest state
+  // on the next render() a user action triggers anyway.
+}
+
+function renderGoalReadout() {
+  const streakEl = document.getElementById("goal-streak");
+  const labelEl = document.getElementById("goal-today-label");
+  const fillEl = document.getElementById("goal-bar-fill");
+  const xpEl = document.getElementById("goal-xp");
+
+  streakEl.textContent = `streak ${streakInfo.streak}d`;
+  streakEl.classList.toggle("active", streakInfo.streak > 0);
+  xpEl.textContent = `${streakInfo.xp}xp`;
+
+  if (streakInfo.today_total === 0) {
+    labelEl.textContent = "no goals today";
+    fillEl.style.width = "0%";
+  } else {
+    labelEl.textContent = `today ${streakInfo.today_done}/${streakInfo.today_total}`;
+    fillEl.style.width = `${Math.round((streakInfo.today_done / streakInfo.today_total) * 100)}%`;
+  }
+}
+
+// targeted DOM patch for one card's marker -- used after a status change so
+// the "done" state appears without a full render() interrupting the FLIP
+// slide that triggered it (see moveIdeaAnimated)
+function updateCardGoalMarker(id) {
+  const markerEl = document.querySelector(`.card[data-id="${id}"] .goal-marker`);
+  if (!markerEl) return;
+  const goal = goalsToday.get(id);
+  markerEl.className = "goal-marker" + (goal ? (goal.completed_at ? " done" : " tagged") : "");
+  markerEl.textContent = goal ? (goal.completed_at ? "done" : "goal") : "goal";
+  markerEl.title = goal ? "tagged as today's goal -- click to untag" : "tag as today's goal";
+}
+
+async function setGoalTagged(id, tagged) {
+  if (tagged) {
+    await fetch("/api/goals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idea_id: id }),
+    });
+  } else {
+    await fetch(`/api/goals/${id}`, { method: "DELETE" });
+  }
+}
+
+async function toggleGoalForIdea(id) {
+  await setGoalTagged(id, !goalsToday.has(id));
+  await fetchGoalState();
+  render();
+  updateSelectionClasses();
+}
+
+// batch g: if every selected card is already tagged, untag them all;
+// otherwise tag whichever aren't yet (fills the gaps rather than toggling
+// each independently, so one keypress reaches a consistent end state)
+async function toggleGoalForSelected() {
+  const ids = Array.from(selectedIds);
+  if (ids.length === 0) return;
+  const allTagged = ids.every((id) => goalsToday.has(id));
+  await Promise.allSettled(ids.map((id) => setGoalTagged(id, !allTagged)));
+  await fetchGoalState();
+  render();
+  updateSelectionClasses();
+}
+
 async function createIdea(text, status) {
   const res = await fetch("/api/ideas", {
     method: "POST",
@@ -300,6 +398,7 @@ async function moveIdeaAnimated(id, status) {
   try {
     const updated = await patchIdea(id, { status });
     Object.assign(idea, updated);
+    fetchGoalState().then(() => updateCardGoalMarker(id)); // a status change may have just completed a goal
   } catch (err) {
     console.error("failed to move idea, reverting", err);
     idea.status = prevStatus;
@@ -327,6 +426,7 @@ async function applyStatusToSelected(status) {
       }
     });
     render();
+    fetchGoalState().then(() => ids.forEach(updateCardGoalMarker));
   }
 
   exitVisualMode();
@@ -351,6 +451,7 @@ async function deleteSelected() {
   ideas = ideas.filter((i) => !deletedIds.has(i.id));
   visualAnchorId = null;
   render();
+  fetchGoalState(); // server cascades goal rows on delete
 
   if (flatOrder.length > 0) {
     const nextIndex = Math.min(Math.max(priorIndex, 0), flatOrder.length - 1);
@@ -550,6 +651,7 @@ async function closeModal(save) {
     Object.assign(idea, updated);
     render();
     updateSelectionClasses();
+    if (payload.status) fetchGoalState().then(() => updateCardGoalMarker(id)); // may have just completed a goal
   } catch (err) {
     console.error("failed to save idea", err);
   }
@@ -577,6 +679,7 @@ document.getElementById("modal-delete").addEventListener("click", async () => {
   }
   ideas = ideas.filter((i) => i.id !== id);
   render();
+  fetchGoalState(); // server cascades goal rows on delete
   if (flatOrder.length > 0) {
     selectCard(flatOrder[0]);
   } else {
@@ -611,7 +714,7 @@ captureForm.addEventListener("submit", (e) => {
 
 // ---- keyboard ----
 
-const ALT_STATUS_KEYS = { i: "inbox", a: "active", q: "queued", h: "horizon", x: "archive" };
+const ALT_STATUS_KEYS = { i: "inbox", a: "active", q: "queued", h: "horizon", f: "frontier", x: "archive" };
 
 document.addEventListener("keydown", (e) => {
   if (!modalBackdrop.hidden) {
@@ -660,6 +763,12 @@ document.addEventListener("keydown", (e) => {
     case "h":
       applyStatusToSelected("horizon");
       break;
+    case "f":
+      applyStatusToSelected("frontier");
+      break;
+    case "g":
+      toggleGoalForSelected();
+      break;
     case "v":
       toggleVisualMode();
       break;
@@ -704,3 +813,7 @@ setInterval(() => {
 }, 30000);
 
 fetchIdeas();
+fetchGoalState().then(() => {
+  render(); // picks up each card's goal marker once the first fetch lands
+  updateSelectionClasses();
+});

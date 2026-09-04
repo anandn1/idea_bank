@@ -26,6 +26,7 @@ STATUS_FLAGS = {
     "active": ("-a", "--active"),
     "queued": ("-q", "--queued"),
     "horizon": ("-H", "--horizon"),
+    "frontier": ("-f", "--frontier"),
     "archive": ("-x", "--archive"),
 }
 
@@ -33,7 +34,8 @@ STATUS_DESCRIPTIONS = {
     "inbox": "just captured, not yet sorted (default for new ideas)",
     "active": "currently being worked on",
     "queued": "worth doing, not now -- auto-moves to archive after 8 weeks untouched",
-    "horizon": "long-term / someday, reviewed quarterly",
+    "horizon": "medium-term / someday, reviewed quarterly",
+    "frontier": "very long-term -- a moonshot or a dream, no review cadence",
     "archive": "done, shelved, or expired",
 }
 
@@ -173,6 +175,14 @@ def build_epilog() -> str:
         "  idea edit 12 --unset-field owner    remove a field\n"
         "  idea show 12                        prints fields if the idea has any\n"
         "\n"
+        "Daily goals (tag existing ideas as today's targets):\n"
+        "  idea goal add 12 13                 tag ideas #12 and #13 as goals for today\n"
+        "  idea goal list                      show today's goals and completion\n"
+        "  idea goal remove 12                 untag idea #12 from today's goals\n"
+        "  idea goal streak                    show the current streak and lifetime xp\n"
+        "  A goal completes itself the moment that idea's status changes -- no\n"
+        "  separate 'done' command.\n"
+        "\n"
         "Bare `idea some text` (no subcommand) is shorthand for `idea capture some text`.\n"
         "move/delete/show accept multiple ids in one call. Run `idea <command> --help`\n"
         "for a command's full flag list, e.g. `idea capture --help`."
@@ -262,6 +272,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
     delete.add_argument("ids", type=int, nargs="+", metavar="id", help="idea id(s)")
     add_json_flag(delete)
+
+    goal = subparsers.add_parser(
+        "goal", help="daily goals: tag ideas as today's targets, track streaks",
+        description=(
+            "Tag existing ideas as goals for a day. A goal completes itself "
+            "automatically the moment that idea's status changes -- there's "
+            "no separate 'done' command."
+        ),
+    )
+    add_json_flag(goal)  # so `idea goal` (no subcommand) can still report --json errors
+    goal_sub = goal.add_subparsers(dest="goal_command", metavar="<goal-command>")
+
+    goal_add = goal_sub.add_parser(
+        "add", help="tag one or more ideas as a goal for today (or --date)",
+    )
+    goal_add.add_argument("ids", type=int, nargs="+", metavar="id")
+    goal_add.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
+    add_json_flag(goal_add)
+
+    goal_remove = goal_sub.add_parser(
+        "remove", help="untag one or more ideas from a day's goals",
+    )
+    goal_remove.add_argument("ids", type=int, nargs="+", metavar="id")
+    goal_remove.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
+    add_json_flag(goal_remove)
+
+    goal_list = goal_sub.add_parser(
+        "list", help="show a day's goals and completion",
+    )
+    goal_list.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
+    add_json_flag(goal_list)
+
+    goal_streak = goal_sub.add_parser(
+        "streak", help="show the current daily-goal streak and lifetime xp",
+    )
+    add_json_flag(goal_streak)
 
     return parser
 
@@ -444,6 +490,8 @@ def cmd_delete(args) -> int:
         missing = missing_ids(conn, args.ids)
         if missing:
             return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
+        for idea_id in args.ids:
+            dbutil.remove_goals_for_idea(conn, idea_id)
         conn.executemany("DELETE FROM ideas WHERE id = ?", [(i,) for i in args.ids])
         conn.commit()
 
@@ -456,6 +504,86 @@ def cmd_delete(args) -> int:
     return 0
 
 
+def cmd_goal_add(args) -> int:
+    date = args.date or dbutil.today_str()
+    with dbutil.connection() as conn:
+        missing = missing_ids(conn, args.ids)
+        if missing:
+            return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
+        goals = [dbutil.add_goal(conn, idea_id, date) for idea_id in args.ids]
+
+    if args.json:
+        print(json.dumps(goals[0] if len(goals) == 1 else goals))
+    else:
+        for g in goals:
+            print(f"goal set for {g['date']}: idea #{g['idea_id']} [{g['status_at_tag']}] {g['idea_text_snapshot']}")
+    return 0
+
+
+def cmd_goal_remove(args) -> int:
+    date = args.date or dbutil.today_str()
+    with dbutil.connection() as conn:
+        removed = [idea_id for idea_id in args.ids if dbutil.remove_goal(conn, idea_id, date)]
+
+    if not removed:
+        return fail(args, f"no goal(s) for {date} matching those id(s)")
+    if args.json:
+        print(json.dumps({"date": date, "removed": removed}))
+    else:
+        for idea_id in removed:
+            print(f"removed goal for {date}: idea #{idea_id}")
+    return 0
+
+
+def cmd_goal_list(args) -> int:
+    date = args.date or dbutil.today_str()
+    with dbutil.connection() as conn:
+        goals = dbutil.goals_for_date(conn, date)
+
+    if args.json:
+        print(json.dumps({"date": date, "goals": goals}))
+        return 0
+    if not goals:
+        print(f"no goals set for {date}")
+        return 0
+    done = sum(1 for g in goals if g["completed_at"])
+    print(f"{date}: {done}/{len(goals)} goals complete")
+    for g in goals:
+        mark = "x" if g["completed_at"] else " "
+        print(f"  [{mark}] idea #{g['idea_id']}: {g['idea_text_snapshot']}")
+    return 0
+
+
+def cmd_goal_streak(args) -> int:
+    with dbutil.connection() as conn:
+        info = dbutil.compute_streak(conn)
+        info["xp"] = dbutil.total_xp(conn)
+
+    if args.json:
+        print(json.dumps(info))
+        return 0
+    print(f"streak: {info['streak']} day(s)  (longest: {info['longest']})  xp: {info['xp']}")
+    if info["today_total"]:
+        print(f"today: {info['today_done']}/{info['today_total']} goals complete")
+    if not info["today_complete"]:
+        print("today isn't locked in yet -- finish today's goals to extend the streak")
+    return 0
+
+
+GOAL_COMMANDS = {
+    "add": cmd_goal_add,
+    "remove": cmd_goal_remove,
+    "list": cmd_goal_list,
+    "streak": cmd_goal_streak,
+}
+
+
+def cmd_goal(args) -> int:
+    if args.goal_command is None:
+        return fail(args, "missing goal subcommand: add/remove/list/streak (see `idea goal --help`)")
+    return GOAL_COMMANDS[args.goal_command](args)
+
+
 COMMANDS = {
     "capture": cmd_capture,
     "list": cmd_list,
@@ -463,6 +591,7 @@ COMMANDS = {
     "move": cmd_move,
     "edit": cmd_edit,
     "delete": cmd_delete,
+    "goal": cmd_goal,
 }
 
 

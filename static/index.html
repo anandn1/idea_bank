@@ -22,12 +22,22 @@
     <button type="button" class="target-pill" data-status="active">active</button>
     <button type="button" class="target-pill" data-status="queued">queued</button>
     <button type="button" class="target-pill" data-status="horizon">horizon</button>
+    <button type="button" class="target-pill" data-status="frontier">frontier</button>
     <button type="button" class="target-pill" data-status="archive">archive</button>
+  </div>
+  <div class="goal-readout" id="goal-readout" aria-label="daily goal progress">
+    <span class="goal-streak" id="goal-streak">streak 0d</span>
+    <span class="goal-today" id="goal-today">
+      <span class="goal-today-label" id="goal-today-label">no goals today</span>
+      <span class="goal-bar"><span class="goal-bar-fill" id="goal-bar-fill"></span></span>
+    </span>
+    <span class="goal-xp" id="goal-xp">0xp</span>
   </div>
   <div class="mode-indicator" id="mode-indicator" hidden></div>
   <div class="help">
     <span><b>j/k</b> move</span>
-    <span><b>a/q/h/x</b> move idea</span>
+    <span><b>a/q/h/f/x</b> move idea</span>
+    <span><b>g</b> daily goal</span>
     <span><b>↵</b> open</span>
     <span><b>e</b> quick edit</span>
     <span><b>v</b> select range</span>
@@ -52,6 +62,10 @@
   <section class="column" data-status="horizon">
     <h2 class="column-title">Horizon</h2>
     <div class="cards" id="cards-horizon"></div>
+  </section>
+  <section class="column" data-status="frontier">
+    <h2 class="column-title">Frontier</h2>
+    <div class="cards" id="cards-frontier"></div>
   </section>
   <section class="column" data-status="archive">
     <h2 class="column-title">Archive</h2>

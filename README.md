@@ -61,7 +61,7 @@ idea didn't exist / was rejected, `2` bad arguments).
 ```
 idea "ship the migration"          # capture -> inbox (bare text = capture)
 idea -q "revisit nvim config"      # capture straight -> queued
-idea -a / -H / -x                  # ...active / horizon / archive
+idea -a / -H / -f / -x             # ...active / horizon / frontier / archive
 idea --status queued "text"        # long form of the same flags
 
 idea list                          # all ideas, newest-updated first
@@ -90,6 +90,11 @@ Note: `-h` is reserved for `--help` (argparse's default), which is why the
 horizon shortcut is uppercase `-H` — everywhere else in this project
 (the GUI, this README) horizon is lowercase `h`.
 
+**Statuses** now run six deep, roughly in increasing time horizon:
+`inbox` → `active` → `queued` → `horizon` (medium-term, reviewed quarterly)
+→ `frontier` (very long-term -- a moonshot or a dream, no review cadence)
+→ `archive`. Run `idea --help` for the full description of each.
+
 **Structured fields** — every idea can carry arbitrary `key=value` metadata
 (due dates, priority, owner, a URL, whatever) on top of its text. There's no
 fixed schema: nothing is required, an idea with no fields is indistinguishable
@@ -108,33 +113,64 @@ JSON API accepts/returns the same shape: `POST`/`PATCH .../api/ideas` take an
 optional `"fields": {...}` object (PATCH replaces the whole object when
 given), and every idea in `GET /api/ideas` includes `"fields"`.
 
+**Daily goals** — tag any existing idea as a target for a given day (default:
+today). A goal completes itself automatically the moment that idea's status
+changes -- there's no separate "done" command or checkbox to keep in sync;
+tagging just snapshots the idea's current status, and any move away from it
+counts as progress. History is persisted, so there's a real streak (an
+unfinished today doesn't break it, it's just not counted yet) and a lifetime
+xp count (total completed goals, no arbitrary point weighting).
+
+```
+idea goal add 12 13                 tag ideas #12 and #13 as goals for today
+idea goal list                      show today's goals and completion
+idea goal remove 12                 untag idea #12 from today's goals
+idea goal streak                    show the current streak and lifetime xp
+idea goal add 12 --date 2026-09-01  tag a goal for a specific day
+```
+
+The same thing from the GUI: press `g` to toggle today's goal on the
+focused/selected card(s), or click a card's `goal` pill directly. It turns
+`done` (gold) the moment the idea's status changes. The top bar shows a
+compact `streak Nd · today x/y · Nxp` readout next to the mode indicator.
+Deleting an idea removes any goal rows pointing at it (CLI, GUI, and the
+JSON API `DELETE /api/ideas/<id>` all cascade) -- a goal that could never
+complete would otherwise silently freeze the streak.
+
+JSON API: `GET /api/goals?date=` (default today), `POST /api/goals
+{"idea_id": ...}`, `DELETE /api/goals/<idea_id>?date=`, `GET
+/api/goals/streak`.
+
 **GUI** — `server.py` serves `static/index.html` and a small JSON API
-(`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`) backed by the same
-SQLite file. `static/app.js` renders five columns (Inbox, Active, Queued,
-Horizon, Archive) and covers the same ground as the CLI, keyboard-first:
+(`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`, plus the goals routes
+above) backed by the same SQLite file. `static/app.js` renders six columns
+(Inbox, Active, Queued, Horizon, Frontier, Archive) and covers the same
+ground as the CLI, keyboard-first:
 
 - Typing anywhere outside the capture box is a shortcut; the capture input
   itself is auto-focused on load and via `/`.
 - **Capture-to-status**: pills next to the capture input (click, or
-  Alt+I/A/Q/H/X while the input is focused) choose where the next capture
+  Alt+I/A/Q/H/F/X while the input is focused) choose where the next capture
   goes; it resets to Inbox after each capture, matching the CLI's per-call
   default.
 - `j` / `k` or `↓` / `↑` move the focus between idea cards (flattened across
-  all five columns, left to right).
-- `a` / `q` / `h` / `x` move the focused (or selected, see below) card(s).
-  A single card slides into its new column — the one deliberate motion in
-  the UI, skipped automatically under `prefers-reduced-motion`; moving more
-  than one at once re-renders directly instead, since several simultaneous
-  slides across columns read as noise, not signal.
+  all six columns, left to right).
+- `a` / `q` / `h` / `f` / `x` move the focused (or selected, see below)
+  card(s). A single card slides into its new column — the one deliberate
+  motion in the UI, skipped automatically under `prefers-reduced-motion`;
+  moving more than one at once re-renders directly instead, since several
+  simultaneous slides across columns read as noise, not signal.
+- `g` toggles today's daily goal on the focused (or selected) card(s) — see
+  **Daily goals** above.
 - `e` edits the focused card's text in place (Enter saves, Escape cancels,
   clicking away saves) — the GUI equivalent of `idea edit`.
 - `d` (or Delete/Backspace) deletes the selected card(s), after a confirm
   prompt — the GUI equivalent of `idea delete`. Cannot be undone.
 - `v` toggles range-select ("visual mode", vim-style): `j`/`k` extend the
   range from wherever `v` was pressed, a status bar shows the count, and
-  `a`/`q`/`h`/`x`/`d` then apply to every selected card at once — the GUI
-  equivalent of the CLI's batch `move`/`delete`. `Escape` cancels back to a
-  single selection.
+  `a`/`q`/`h`/`f`/`x`/`g`/`d` then apply to every selected card at once — the
+  GUI equivalent of the CLI's batch `move`/`goal add`/`delete`. `Escape`
+  cancels back to a single selection.
 - **Enter** (or double-click, or drag) opens the focused card's **detail
   view** — a modal with the full text (editable), status (as pills), every
   structured field (editable, with an "add field" row), freeform notes, and
@@ -144,7 +180,7 @@ Horizon, Archive) and covers the same ground as the CLI, keyboard-first:
   convention. This is the GUI's full equivalent of `idea show` + `idea edit
   --field` + `idea edit --unset-field` combined.
 - **Drag and drop**: drag a card onto another column to move it there (same
-  effect as `a`/`q`/`h`/`x`, mouse-driven). Single-card only — for moving
+  effect as `a`/`q`/`h`/`f`/`x`, mouse-driven). Single-card only — for moving
   several at once, use `v` + `j`/`k` + a status key instead.
 - Clicking a card selects it (mouse fallback); Shift+click extends a range
   the same way `v` + `j`/`k` does. Clicking is never required.
@@ -249,9 +285,15 @@ you're ready to touch that file.
   sortable as text). Migrated rows get `:00` appended to the old system's
   minute-precision timestamps.
 - **Flattened keyboard navigation.** `j`/`k`/arrows move through all cards in
-  column order (Inbox → Active → Queued → Horizon → Archive), not just within
-  one column, since the brief didn't specify and this keeps a single mental
-  model for "next/previous idea."
+  column order (Inbox → Active → Queued → Horizon → Frontier → Archive), not
+  just within one column, since the brief didn't specify and this keeps a
+  single mental model for "next/previous idea."
+- **Goal completion is derived, not set.** A daily goal snapshots the idea's
+  status at tag time; `dbutil.sync_goal_completion()` stamps it done the
+  moment the live status differs, computed lazily on every goal read rather
+  than hooked into each of the several status-change code paths (CLI `move`,
+  the JSON API's `PATCH`, drag-and-drop, the detail modal). One source of
+  truth instead of four call sites that could drift out of sync.
 - **Corruption heuristics for migration** are pattern-based (blank text,
   shell-history/path markers) rather than hardcoded to the two known bad
   lines, so the script stays useful if `inbox.md` grows more such lines

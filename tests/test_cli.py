@@ -257,6 +257,121 @@ def test_delete_missing_id_is_atomic(run_cli):
     assert run_cli("show", str(a["id"]), "--json").returncode == 0
 
 
+# ---- frontier status ----
+
+
+def test_capture_frontier_short_flag(run_cli):
+    result = run_cli("-f", "a moonshot", "--json")
+    assert parse(result)["status"] == "frontier"
+
+
+def test_move_to_frontier(run_cli):
+    created = parse(run_cli("x", "--json"))
+    idea = parse(run_cli("move", str(created["id"]), "-f", "--json"))
+    assert idea["status"] == "frontier"
+
+
+# ---- goal ----
+
+
+def test_goal_add_single(run_cli):
+    created = parse(run_cli("x", "--json"))
+    goal = parse(run_cli("goal", "add", str(created["id"]), "--json"))
+    assert goal["idea_id"] == created["id"]
+    assert goal["completed_at"] is None
+
+
+def test_goal_add_batch(run_cli):
+    ids = [parse(run_cli(t, "--json"))["id"] for t in ("a", "b")]
+    goals = parse(run_cli("goal", "add", *map(str, ids), "--json"))
+    assert len(goals) == 2
+
+
+def test_goal_add_missing_id_is_atomic(run_cli):
+    a = parse(run_cli("a", "--json"))
+    result = run_cli("goal", "add", str(a["id"]), "9999", "--json")
+    assert result.returncode == 1
+    assert parse(run_cli("goal", "list", "--json"))["goals"] == []
+
+
+def test_goal_add_retag_is_a_noop(run_cli):
+    created = parse(run_cli("x", "--json"))
+    run_cli("goal", "add", str(created["id"]), "--json")
+    run_cli("goal", "add", str(created["id"]), "--json")
+    goals = parse(run_cli("goal", "list", "--json"))["goals"]
+    assert len(goals) == 1
+
+
+def test_goal_list_empty(run_cli):
+    result = run_cli("goal", "list")
+    assert result.returncode == 0
+    assert "no goals set" in result.stdout
+
+
+def test_goal_list_shows_completion(run_cli):
+    created = parse(run_cli("x", "--json"))
+    run_cli("goal", "add", str(created["id"]), "--json")
+
+    before = parse(run_cli("goal", "list", "--json"))
+    assert before["goals"][0]["completed_at"] is None
+
+    run_cli("move", str(created["id"]), "active", "--json")
+    after = parse(run_cli("goal", "list", "--json"))
+    assert after["goals"][0]["completed_at"] is not None
+
+
+def test_goal_remove(run_cli):
+    created = parse(run_cli("x", "--json"))
+    run_cli("goal", "add", str(created["id"]), "--json")
+    result = run_cli("goal", "remove", str(created["id"]), "--json")
+    assert result.returncode == 0
+    assert parse(run_cli("goal", "list", "--json"))["goals"] == []
+
+
+def test_goal_remove_not_tagged_fails(run_cli):
+    created = parse(run_cli("x", "--json"))
+    result = run_cli("goal", "remove", str(created["id"]), "--json")
+    assert result.returncode == 1
+
+
+def test_goal_streak_json_shape(run_cli):
+    result = run_cli("goal", "streak", "--json")
+    assert result.returncode == 0
+    streak = parse(result)
+    assert set(streak) >= {
+        "streak",
+        "longest",
+        "today_complete",
+        "today_done",
+        "today_total",
+        "xp",
+    }
+
+
+def test_goal_streak_advances_after_completion(run_cli):
+    created = parse(run_cli("x", "--json"))
+    run_cli("goal", "add", str(created["id"]), "--json")
+    run_cli("move", str(created["id"]), "active", "--json")
+
+    streak = parse(run_cli("goal", "streak", "--json"))
+    assert streak["today_complete"] is True
+    assert streak["streak"] == 1
+    assert streak["xp"] == 1
+
+
+def test_goal_no_subcommand_fails(run_cli):
+    result = run_cli("goal", "--json")
+    assert result.returncode == 1
+
+
+def test_delete_idea_cascades_its_goal(run_cli):
+    created = parse(run_cli("x", "--json"))
+    run_cli("goal", "add", str(created["id"]), "--json")
+    run_cli("delete", str(created["id"]), "--json")
+
+    assert parse(run_cli("goal", "list", "--json"))["goals"] == []
+
+
 # ---- help / misc ----
 
 
