@@ -172,155 +172,205 @@ def test_ensure_frontier_status_is_idempotent(db_path):
     dbutil.add_idea("x", status="frontier")  # would raise if the CHECK weren't widened
 
 
-# ---- daily goals ----
+# ---- goals ----
+#
+# A goal is its own thing (own text), optionally linked to an idea, always
+# self-reported as done -- never derived from an idea's status.
 
 
-def test_add_goal_snapshots_text_and_status(conn):
-    idea_id = dbutil.add_idea("ship it", status="active")
-    goal = dbutil.add_goal(conn, idea_id, "2026-09-04")
+def _insert_recurring_goal(conn, text, created_at_date):
+    """Backdate a recurring goal's created_at so streak tests can control
+    which days it's due on, instead of racing the real current date."""
+    conn.execute(
+        "INSERT INTO goals (text, recurring, created_at) VALUES (?, 1, ?)",
+        (text, f"{created_at_date} 08:00:00"),
+    )
+    conn.commit()
+    return conn.execute("SELECT id FROM goals WHERE text = ?", (text,)).fetchone()["id"]
 
+
+def test_create_goal_one_off_defaults_target_date_to_today(conn):
+    goal = dbutil.create_goal(conn, "x")
+    assert goal["target_date"] == dbutil.today_str()
+    assert goal["recurring"] == 0
+    assert goal["idea_id"] is None
+
+
+def test_create_goal_recurring_ignores_target_date(conn):
+    goal = dbutil.create_goal(conn, "x", recurring=True, target_date="2026-09-05")
+    assert goal["target_date"] is None
+    assert goal["recurring"] == 1
+
+
+def test_create_goal_with_idea_link(conn):
+    idea_id = dbutil.add_idea("run every day")
+    goal = dbutil.create_goal(conn, "walk 10000 steps", idea_id=idea_id, recurring=True)
     assert goal["idea_id"] == idea_id
-    assert goal["idea_text_snapshot"] == "ship it"
-    assert goal["status_at_tag"] == "active"
-    assert goal["completed_at"] is None
 
 
-def test_add_goal_missing_idea_returns_none(conn):
-    assert dbutil.add_goal(conn, 9999, "2026-09-04") is None
+def test_create_goal_missing_idea_returns_none(conn):
+    assert dbutil.create_goal(conn, "x", idea_id=9999) is None
 
 
-def test_add_goal_retagging_is_a_noop(conn):
-    idea_id = dbutil.add_idea("x")
-    first = dbutil.add_goal(conn, idea_id, "2026-09-04")
-    second = dbutil.add_goal(conn, idea_id, "2026-09-04")
-
-    assert first["id"] == second["id"]
-    assert len(dbutil.goals_for_date(conn, "2026-09-04")) == 1
+def test_missing_goal_ids(conn):
+    goal = dbutil.create_goal(conn, "x")
+    assert dbutil.missing_goal_ids(conn, [goal["id"], 9999]) == [9999]
 
 
-def test_remove_goal(conn):
-    idea_id = dbutil.add_idea("x")
-    dbutil.add_goal(conn, idea_id, "2026-09-04")
-
-    assert dbutil.remove_goal(conn, idea_id, "2026-09-04") is True
-    assert dbutil.goals_for_date(conn, "2026-09-04") == []
-
-
-def test_remove_goal_not_tagged_returns_false(conn):
-    idea_id = dbutil.add_idea("x")
-    assert dbutil.remove_goal(conn, idea_id, "2026-09-04") is False
+def test_goals_due_on_recurring_due_every_day_since_creation(conn):
+    _insert_recurring_goal(conn, "walk", "2026-09-01")
+    assert dbutil.goals_due_on(conn, "2026-08-31") == []  # before creation
+    assert len(dbutil.goals_due_on(conn, "2026-09-01")) == 1
+    assert len(dbutil.goals_due_on(conn, "2026-09-10")) == 1
 
 
-def test_remove_goals_for_idea(conn):
-    idea_id = dbutil.add_idea("x")
-    dbutil.add_goal(conn, idea_id, "2026-09-04")
-    dbutil.remove_goals_for_idea(conn, idea_id)
+def test_goals_due_on_one_off_only_on_target_date(conn):
+    goal = dbutil.create_goal(conn, "draft the proposal", target_date="2026-09-05")
+    assert dbutil.goals_due_on(conn, "2026-09-04") == []
+    due = dbutil.goals_due_on(conn, "2026-09-05")
+    assert len(due) == 1
+    assert due[0]["id"] == goal["id"]
+
+
+def test_set_goal_done_toggle(conn):
+    goal = dbutil.create_goal(conn, "x")
+    date = goal["target_date"]
+
+    done = dbutil.set_goal_done(conn, goal["id"], date, True)
+    assert done["completed_at"] is not None
+
+    undone = dbutil.set_goal_done(conn, goal["id"], date, False)
+    assert undone["completed_at"] is None
+
+
+def test_set_goal_done_not_due_returns_none(conn):
+    goal = dbutil.create_goal(conn, "x", target_date="2026-09-05")
+    assert dbutil.set_goal_done(conn, goal["id"], "2026-09-01", True) is None
+
+
+def test_set_goal_done_missing_goal_returns_none(conn):
+    assert dbutil.set_goal_done(conn, 9999, "2026-09-04", True) is None
+
+
+def test_stop_goal_only_works_on_recurring(conn):
+    one_off = dbutil.create_goal(conn, "x")
+    assert dbutil.stop_goal(conn, one_off["id"]) is False
+
+    recurring = dbutil.create_goal(conn, "y", recurring=True)
+    assert dbutil.stop_goal(conn, recurring["id"]) is True
+    assert dbutil.stop_goal(conn, recurring["id"]) is False  # already stopped
+
+
+def test_stop_goal_removes_it_from_current_and_future_dates(conn):
+    goal = dbutil.create_goal(conn, "walk", recurring=True)
+    today = dbutil.today_str()
+    assert len(dbutil.goals_due_on(conn, today)) == 1
+
+    dbutil.stop_goal(conn, goal["id"])
+    assert dbutil.goals_due_on(conn, today) == []
+
+
+def test_remove_goal_deletes_definition_and_history(conn):
+    goal = dbutil.create_goal(conn, "x")
+    dbutil.set_goal_done(conn, goal["id"], goal["target_date"], True)
+
+    assert dbutil.remove_goal(conn, goal["id"]) is True
+    assert dbutil.get_goal(conn, goal["id"]) is None
+    assert dbutil.goals_due_on(conn, goal["target_date"]) == []
+
+
+def test_remove_goal_missing_returns_false(conn):
+    assert dbutil.remove_goal(conn, 9999) is False
+
+
+def test_unlink_goals_from_idea(conn):
+    idea_id = dbutil.add_idea("run every day")
+    goal = dbutil.create_goal(conn, "walk 10000 steps", idea_id=idea_id)
+
+    dbutil.unlink_goals_from_idea(conn, idea_id)
     conn.commit()
 
-    assert dbutil.goals_for_date(conn, "2026-09-04") == []
-
-
-def test_sync_goal_completion_flips_only_on_real_status_change(conn):
-    idea_id = dbutil.add_idea("x", status="inbox")
-    dbutil.add_goal(conn, idea_id, "2026-09-04")
-
-    goals = dbutil.goals_for_date(conn, "2026-09-04")  # syncs internally
-    assert goals[0]["completed_at"] is None
-
-    conn.execute("UPDATE ideas SET status = 'active' WHERE id = ?", (idea_id,))
-    conn.commit()
-
-    goals = dbutil.goals_for_date(conn, "2026-09-04")
-    assert goals[0]["completed_at"] is not None
-
-
-def test_sync_goal_completion_is_sticky(conn):
-    """Moving the idea back to its original status doesn't un-win the goal."""
-    idea_id = dbutil.add_idea("x", status="inbox")
-    dbutil.add_goal(conn, idea_id, "2026-09-04")
-    conn.execute("UPDATE ideas SET status = 'active' WHERE id = ?", (idea_id,))
-    conn.commit()
-    dbutil.goals_for_date(conn, "2026-09-04")  # sync
-    completed_at = dbutil.goals_for_date(conn, "2026-09-04")[0]["completed_at"]
-
-    conn.execute("UPDATE ideas SET status = 'inbox' WHERE id = ?", (idea_id,))
-    conn.commit()
-
-    goals = dbutil.goals_for_date(conn, "2026-09-04")
-    assert goals[0]["completed_at"] == completed_at
-
-
-def test_completed_dates_requires_all_goals_done(conn):
-    a = dbutil.add_idea("a", status="inbox")
-    b = dbutil.add_idea("b", status="inbox")
-    dbutil.add_goal(conn, a, "2026-09-04")
-    dbutil.add_goal(conn, b, "2026-09-04")
-    conn.execute("UPDATE ideas SET status = 'active' WHERE id = ?", (a,))
-    conn.commit()
-
-    assert dbutil.completed_dates(conn) == set()  # b still pending
-
-    conn.execute("UPDATE ideas SET status = 'active' WHERE id = ?", (b,))
-    conn.commit()
-
-    assert dbutil.completed_dates(conn) == {"2026-09-04"}
+    refreshed = dbutil.get_goal(conn, goal["id"])
+    assert refreshed is not None
+    assert refreshed["idea_id"] is None
 
 
 def test_compute_streak_counts_consecutive_complete_days(conn):
-    dates = ["2026-09-01", "2026-09-02", "2026-09-03"]
-    # create every idea first: dbutil.add_idea() opens its own connection,
-    # which would deadlock against `conn`'s open write transaction if
-    # interleaved with the updates below
-    idea_ids = {
-        date: dbutil.add_idea(f"idea for {date}", status="inbox") for date in dates
-    }
-
-    for date in dates:
-        dbutil.add_goal(conn, idea_ids[date], date)
-        conn.execute(
-            "UPDATE ideas SET status = 'active' WHERE id = ?", (idea_ids[date],)
-        )
-    conn.commit()
+    goal_id = _insert_recurring_goal(conn, "walk 10000 steps", "2026-09-01")
+    for date in ["2026-09-01", "2026-09-02", "2026-09-03"]:
+        dbutil.set_goal_done(conn, goal_id, date, True)
 
     info = dbutil.compute_streak(conn, today="2026-09-04")
     assert info["streak"] == 3
-    assert info["today_total"] == 0
-    assert info["today_complete"] is False  # no goals today; doesn't break the streak
+    assert info["today_total"] == 1  # the habit is still due today
+    assert info["today_complete"] is False  # ...just not done yet
 
 
 def test_compute_streak_unfinished_today_does_not_break_streak(conn):
-    idea_id = dbutil.add_idea("yesterday", status="inbox")
-    dbutil.add_goal(conn, idea_id, "2026-09-03")
-    conn.execute("UPDATE ideas SET status = 'active' WHERE id = ?", (idea_id,))
-    conn.commit()
-
-    today_idea = dbutil.add_idea("today", status="inbox")
-    dbutil.add_goal(conn, today_idea, "2026-09-04")  # tagged, not yet advanced
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    for date in ["2026-09-01", "2026-09-02", "2026-09-03"]:
+        dbutil.set_goal_done(conn, goal_id, date, True)
+    # today (2026-09-04) intentionally left undone
 
     info = dbutil.compute_streak(conn, today="2026-09-04")
-    assert info["streak"] == 1
+    assert info["streak"] == 3
     assert info["today_complete"] is False
     assert info["today_done"] == 0
     assert info["today_total"] == 1
 
 
-def test_compute_streak_breaks_on_a_gap(conn):
-    idea_id = dbutil.add_idea("two days ago", status="inbox")
-    dbutil.add_goal(conn, idea_id, "2026-09-02")
-    conn.execute("UPDATE ideas SET status = 'active' WHERE id = ?", (idea_id,))
-    conn.commit()
-    # 2026-09-03 has no goals at all -- gap before today
+def test_compute_streak_breaks_on_a_missed_due_day(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    dbutil.set_goal_done(conn, goal_id, "2026-09-01", True)
+    # 2026-09-02 due but never marked done -- breaks the streak
+    dbutil.set_goal_done(conn, goal_id, "2026-09-03", True)
 
     info = dbutil.compute_streak(conn, today="2026-09-04")
-    assert info["streak"] == 0
+    assert info["streak"] == 1  # only yesterday (09-03) counts
 
 
-def test_total_xp_counts_completions_only(conn):
-    a = dbutil.add_idea("a", status="inbox")
-    b = dbutil.add_idea("b", status="inbox")
-    dbutil.add_goal(conn, a, "2026-09-04")
-    dbutil.add_goal(conn, b, "2026-09-04")
-    conn.execute("UPDATE ideas SET status = 'active' WHERE id = ?", (a,))
+def test_compute_streak_skips_days_with_nothing_due(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    dbutil.set_goal_done(conn, goal_id, "2026-09-01", True)
+    # stop it right after -- 09-02 onward has nothing due at all, so those
+    # days are skipped, not treated as a break
+    conn.execute(
+        "UPDATE goals SET archived_at = ? WHERE id = ?",
+        ("2026-09-02 00:00:00", goal_id),
+    )
     conn.commit()
 
-    assert dbutil.total_xp(conn) == 1
+    info = dbutil.compute_streak(conn, today="2026-09-04")
+    assert info["today_total"] == 0
+    assert info["streak"] == 1
+
+
+def test_compute_streak_no_goals_ever(conn):
+    info = dbutil.compute_streak(conn, today="2026-09-04")
+    assert info == {
+        "streak": 0,
+        "longest": 0,
+        "today_complete": False,
+        "today_done": 0,
+        "today_total": 0,
+    }
+
+
+def test_compute_streak_longest_survives_a_break(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    for date in ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05"]:
+        dbutil.set_goal_done(conn, goal_id, date, True)
+    # 2026-09-06 due but missed -- breaks the run
+    dbutil.set_goal_done(conn, goal_id, "2026-09-07", True)
+
+    info = dbutil.compute_streak(conn, today="2026-09-07")
+    assert info["streak"] == 1
+    assert info["longest"] == 5
+
+
+def test_total_xp_counts_completed_goal_days(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    dbutil.set_goal_done(conn, goal_id, "2026-09-01", True)
+    dbutil.set_goal_done(conn, goal_id, "2026-09-02", True)
+
+    assert dbutil.total_xp(conn) == 2

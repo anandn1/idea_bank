@@ -93,7 +93,7 @@ def update_idea(idea_id):
 @app.delete("/api/ideas/<int:idea_id>")
 def delete_idea(idea_id):
     with dbutil.connection() as conn:
-        dbutil.remove_goals_for_idea(conn, idea_id)
+        dbutil.unlink_goals_from_idea(conn, idea_id)
         conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
         conn.commit()
         return "", 204
@@ -103,30 +103,64 @@ def delete_idea(idea_id):
 def list_goals():
     date = request.args.get("date") or dbutil.today_str()
     with dbutil.connection() as conn:
-        goals = dbutil.goals_for_date(conn, date)
+        goals = dbutil.goals_due_on(conn, date)
         return jsonify({"date": date, "goals": goals})
 
 
 @app.post("/api/goals")
 def create_goal():
     payload = request.get_json(silent=True) or {}
+    text = (payload.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "text is required"}), 400
+
     idea_id = payload.get("idea_id")
-    if not isinstance(idea_id, int):
-        return jsonify({"error": "idea_id is required"}), 400
-    date = payload.get("date") or dbutil.today_str()
+    if idea_id is not None and not isinstance(idea_id, int):
+        return jsonify({"error": "idea_id must be an integer"}), 400
+    recurring = bool(payload.get("recurring"))
+    target_date = payload.get("target_date")
+    if recurring and target_date:
+        return jsonify({"error": "target_date doesn't apply to a recurring goal"}), 400
 
     with dbutil.connection() as conn:
-        goal = dbutil.add_goal(conn, idea_id, date)
+        goal = dbutil.create_goal(
+            conn,
+            text,
+            idea_id=idea_id,
+            recurring=recurring,
+            target_date=target_date,
+        )
         if goal is None:
-            return jsonify({"error": "not found"}), 404
+            return jsonify({"error": "no idea with that id"}), 404
         return jsonify(goal), 201
 
 
-@app.delete("/api/goals/<int:idea_id>")
-def remove_goal_route(idea_id):
-    date = request.args.get("date") or dbutil.today_str()
+@app.patch("/api/goals/<int:goal_id>")
+def update_goal(goal_id):
+    payload = request.get_json(silent=True) or {}
+    date = payload.get("date") or dbutil.today_str()
+    if "completed" not in payload:
+        return jsonify({"error": "completed (bool) is required"}), 400
+
     with dbutil.connection() as conn:
-        dbutil.remove_goal(conn, idea_id, date)
+        goal = dbutil.set_goal_done(conn, goal_id, date, bool(payload["completed"]))
+        if goal is None:
+            return jsonify({"error": "goal not found or not due on that date"}), 404
+        return jsonify(goal)
+
+
+@app.post("/api/goals/<int:goal_id>/stop")
+def stop_goal_route(goal_id):
+    with dbutil.connection() as conn:
+        if not dbutil.stop_goal(conn, goal_id):
+            return jsonify({"error": "not a recurring goal, or already stopped"}), 400
+        return jsonify(dbutil.get_goal(conn, goal_id))
+
+
+@app.delete("/api/goals/<int:goal_id>")
+def remove_goal_route(goal_id):
+    with dbutil.connection() as conn:
+        dbutil.remove_goal(conn, goal_id)
         return "", 204
 
 

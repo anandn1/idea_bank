@@ -41,15 +41,22 @@ CREATE TABLE IF NOT EXISTS ideas (
 SCHEMA = f"""
 {IDEAS_TABLE}
 
-CREATE TABLE IF NOT EXISTS daily_goals (
+CREATE TABLE IF NOT EXISTS goals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT NOT NULL,
-    idea_id INTEGER NOT NULL,
-    idea_text_snapshot TEXT NOT NULL,
-    status_at_tag TEXT NOT NULL,
+    text TEXT NOT NULL,
+    idea_id INTEGER,
+    recurring INTEGER NOT NULL DEFAULT 0,
+    target_date TEXT,
     created_at TEXT NOT NULL,
+    archived_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS goal_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    goal_id INTEGER NOT NULL,
+    date TEXT NOT NULL,
     completed_at TEXT,
-    UNIQUE(date, idea_id)
+    UNIQUE(goal_id, date)
 );
 
 CREATE TABLE IF NOT EXISTS import_log (
@@ -108,6 +115,27 @@ def _ensure_frontier_status(conn: sqlite3.Connection) -> None:
         """)
 
 
+def _migrate_from_v1_daily_goals(conn: sqlite3.Connection) -> None:
+    """One-time bridge off the first cut of daily goals (idea-tag-based,
+    required an idea, auto-completed via status change). Replaced by the
+    standalone `goals`/`goal_log` model below. Empty in every real database
+    this shipped to, so drop it outright; rename aside instead of dropping
+    if it somehow isn't, so no history is ever silently destroyed.
+    """
+    tables = {
+        row["name"]
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    }
+    if "daily_goals" not in tables:
+        return
+    count = conn.execute("SELECT COUNT(*) AS n FROM daily_goals").fetchone()["n"]
+    if count == 0:
+        conn.execute("DROP TABLE daily_goals")
+    else:
+        conn.execute("ALTER TABLE daily_goals RENAME TO daily_goals_v1_backup")
+    conn.commit()
+
+
 def get_conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
@@ -116,6 +144,7 @@ def get_conn() -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     _ensure_fields_column(conn)
     _ensure_frontier_status(conn)
+    _migrate_from_v1_daily_goals(conn)
     return conn
 
 
@@ -171,139 +200,204 @@ def get_idea(conn: sqlite3.Connection, idea_id: int) -> dict | None:
     return row_to_idea(row) if row else None
 
 
-# ---- daily goals ----
+# ---- goals ----
 #
-# A goal is an existing idea tagged for a given calendar day. Completion is
-# derived, not set directly: tagging snapshots the idea's status, and the
-# goal is "done" the moment the idea's live status differs from that
-# snapshot. sync_goal_completion() is the only place that stamps
-# completed_at, and every read below calls it first, so completion never
-# depends on hooking every status-change code path (CLI move, PATCH,
-# drag-drop, the expiry sweep) -- it's just derived from current state.
+# A goal is its own thing -- its own text, e.g. "walk 10000 steps" -- not a
+# tagged idea. It can optionally point at an idea (a concrete step toward
+# that longer-term objective) but doesn't have to. A goal is either:
+#   - recurring: due every day from its created_at date until it's stopped
+#     (archived_at set), e.g. a daily habit
+#   - one-off: due on exactly one target_date
+# Completion is always self-reported into goal_log, one row per
+# (goal_id, date) -- never derived from an idea's status, since most goals
+# (the steps-walked example) have no idea, and thus no status, to derive
+# from at all.
 
 
 def today_str() -> str:
     return datetime.now().date().isoformat()
 
 
-def add_goal(conn: sqlite3.Connection, idea_id: int, date: str) -> dict | None:
-    """Tag an idea as a goal for `date`. Re-tagging an already-tagged idea
-    is a no-op, not an error. Returns None if the idea doesn't exist."""
-    idea = get_idea(conn, idea_id)
-    if idea is None:
+def create_goal(
+    conn: sqlite3.Connection,
+    text: str,
+    idea_id: int | None = None,
+    recurring: bool = False,
+    target_date: str | None = None,
+) -> dict | None:
+    """Returns None if idea_id is given but doesn't exist. A recurring goal
+    ignores target_date (it's due every day); a one-off goal defaults to
+    today if target_date isn't given."""
+    if idea_id is not None and get_idea(conn, idea_id) is None:
         return None
-    conn.execute(
-        "INSERT OR IGNORE INTO daily_goals "
-        "(date, idea_id, idea_text_snapshot, status_at_tag, created_at) "
+    if not recurring and target_date is None:
+        target_date = today_str()
+    if recurring:
+        target_date = None
+
+    cur = conn.execute(
+        "INSERT INTO goals (text, idea_id, recurring, target_date, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
-        (date, idea_id, idea["text"], idea["status"], now_str()),
+        (text, idea_id, 1 if recurring else 0, target_date, now_str()),
     )
     conn.commit()
-    return get_goal(conn, date, idea_id)
+    return get_goal(conn, cur.lastrowid)
 
 
-def remove_goal(conn: sqlite3.Connection, idea_id: int, date: str) -> bool:
+def get_goal(conn: sqlite3.Connection, goal_id: int) -> dict | None:
+    row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def missing_goal_ids(conn: sqlite3.Connection, goal_ids: list[int]) -> list[int]:
+    placeholders = ",".join("?" * len(goal_ids))
+    found = {
+        row["id"]
+        for row in conn.execute(
+            f"SELECT id FROM goals WHERE id IN ({placeholders})", goal_ids
+        )
+    }
+    return [i for i in goal_ids if i not in found]
+
+
+def stop_goal(conn: sqlite3.Connection, goal_id: int) -> bool:
+    """Archive a recurring goal so it stops being due -- history (past
+    goal_log rows) is kept. No-op (returns False) for a one-off goal or one
+    already stopped."""
     cur = conn.execute(
-        "DELETE FROM daily_goals WHERE date = ? AND idea_id = ?", (date, idea_id)
+        "UPDATE goals SET archived_at = ? "
+        "WHERE id = ? AND recurring = 1 AND archived_at IS NULL",
+        (now_str(), goal_id),
     )
     conn.commit()
     return cur.rowcount > 0
 
 
-def remove_goals_for_idea(conn: sqlite3.Connection, idea_id: int) -> None:
-    """Called when an idea is deleted: a goal pointing at a deleted idea
-    could never complete and would silently freeze the streak forever."""
-    conn.execute("DELETE FROM daily_goals WHERE idea_id = ?", (idea_id,))
-
-
-def sync_goal_completion(conn: sqlite3.Connection) -> None:
-    """Stamp completed_at on any goal whose idea has moved off its
-    snapshotted status. Sticky: moving the idea back doesn't un-win it."""
-    conn.execute(
-        "UPDATE daily_goals SET completed_at = ? "
-        "WHERE completed_at IS NULL AND EXISTS ("
-        "  SELECT 1 FROM ideas WHERE ideas.id = daily_goals.idea_id "
-        "  AND ideas.status != daily_goals.status_at_tag"
-        ")",
-        (now_str(),),
-    )
+def remove_goal(conn: sqlite3.Connection, goal_id: int) -> bool:
+    """Hard-delete a goal definition and all of its completion history."""
+    conn.execute("DELETE FROM goal_log WHERE goal_id = ?", (goal_id,))
+    cur = conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
     conn.commit()
+    return cur.rowcount > 0
 
 
-def get_goal(conn: sqlite3.Connection, date: str, idea_id: int) -> dict | None:
-    row = conn.execute(
-        "SELECT * FROM daily_goals WHERE date = ? AND idea_id = ?", (date, idea_id)
-    ).fetchone()
-    return dict(row) if row else None
+def unlink_goals_from_idea(conn: sqlite3.Connection, idea_id: int) -> None:
+    """Called when an idea is deleted: the goal(s) that referenced it keep
+    existing (and keep their history) -- they just lose the link, since
+    completion was never derived from the idea in the first place."""
+    conn.execute("UPDATE goals SET idea_id = NULL WHERE idea_id = ?", (idea_id,))
 
 
-def goals_for_date(conn: sqlite3.Connection, date: str) -> list[dict]:
-    sync_goal_completion(conn)
+def goals_due_on(conn: sqlite3.Connection, date: str) -> list[dict]:
+    """Every goal due on `date`: recurring goals active that day, plus
+    one-off goals targeting it exactly. completed_at comes from goal_log if
+    a row exists for that day, else NULL (nothing logged = not done)."""
     rows = conn.execute(
-        "SELECT * FROM daily_goals WHERE date = ? ORDER BY created_at", (date,)
+        "SELECT g.*, gl.completed_at AS completed_at "
+        "FROM goals g "
+        "LEFT JOIN goal_log gl ON gl.goal_id = g.id AND gl.date = ? "
+        "WHERE (g.recurring = 1 AND date(g.created_at) <= date(?) "
+        "       AND (g.archived_at IS NULL OR date(g.archived_at) > date(?))) "
+        "   OR (g.recurring = 0 AND g.target_date = ?) "
+        "ORDER BY g.created_at",
+        (date, date, date, date),
     ).fetchall()
     return [dict(row) for row in rows]
 
 
-def completed_dates(conn: sqlite3.Connection) -> set[str]:
-    """Every date with at least one goal, where all of that date's goals
-    are complete."""
-    sync_goal_completion(conn)
-    rows = conn.execute(
-        "SELECT date, COUNT(*) AS total, "
-        "       SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END) AS done "
-        "FROM daily_goals GROUP BY date"
-    ).fetchall()
-    return {
-        row["date"] for row in rows if row["total"] > 0 and row["done"] == row["total"]
-    }
+def set_goal_done(
+    conn: sqlite3.Connection, goal_id: int, date: str, done: bool
+) -> dict | None:
+    """Returns None (no-op) if the goal doesn't exist or isn't due on
+    `date` -- e.g. a one-off goal targeting a different day, or a recurring
+    goal not yet started/already stopped by then."""
+    due = goals_due_on(conn, date)
+    if not any(g["id"] == goal_id for g in due):
+        return None
+    if done:
+        conn.execute(
+            "INSERT INTO goal_log (goal_id, date, completed_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(goal_id, date) DO UPDATE SET completed_at = excluded.completed_at",
+            (goal_id, date, now_str()),
+        )
+    else:
+        conn.execute(
+            "DELETE FROM goal_log WHERE goal_id = ? AND date = ?", (goal_id, date)
+        )
+    conn.commit()
+    return next((g for g in goals_due_on(conn, date) if g["id"] == goal_id), None)
 
 
-def _longest_streak(days: set[str]) -> int:
-    from datetime import date as date_cls
+def _earliest_goal_date(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        "SELECT MIN(d) AS floor FROM ("
+        "  SELECT date(created_at) AS d FROM goals WHERE recurring = 1"
+        "  UNION ALL"
+        "  SELECT target_date AS d FROM goals WHERE recurring = 0"
+        ")"
+    ).fetchone()
+    return row["floor"]
 
-    parsed = sorted(date_cls.fromisoformat(d) for d in days)
-    longest = run = 0
-    prev = None
-    for day in parsed:
-        run = run + 1 if prev is not None and (day - prev).days == 1 else 1
-        longest = max(longest, run)
-        prev = day
-    return longest
+
+def _day_is_won(due: list[dict]) -> bool | None:
+    """True/False if `due` (goals_due_on's result for some day) settles the
+    day; None if nothing was due at all, which neither wins nor breaks a
+    streak -- a day before any goal existed, or after all were stopped."""
+    if not due:
+        return None
+    return all(g["completed_at"] for g in due)
 
 
 def compute_streak(conn: sqlite3.Connection, today: str | None = None) -> dict:
-    """Count consecutive complete days ending at `today` (default: the real
-    current date). An unfinished today doesn't break the streak -- it's
-    just not counted until it's done."""
+    """Walk backward from `today`, counting consecutive won days. A day with
+    nothing due is skipped, not counted and not a break. An unfinished
+    today doesn't break the streak -- it's just not counted until it's won."""
     from datetime import date as date_cls, timedelta
 
     today_d = date_cls.fromisoformat(today) if today else date_cls.today()
-    done = completed_dates(conn)
+    floor = _earliest_goal_date(conn)
 
-    today_complete = today_d.isoformat() in done
-    day = today_d if today_complete else today_d - timedelta(days=1)
-    streak = 0
-    while day.isoformat() in done:
-        streak += 1
-        day -= timedelta(days=1)
+    today_due = goals_due_on(conn, today_d.isoformat())
+    today_done = sum(1 for g in today_due if g["completed_at"])
+    today_won = _day_is_won(today_due)
 
-    goals_today = goals_for_date(conn, today_d.isoformat())
-    today_done = sum(1 for g in goals_today if g["completed_at"])
+    streak = longest = run = 0
+    if floor is not None:
+        floor_d = date_cls.fromisoformat(floor)
+        day = today_d if today_won else today_d - timedelta(days=1)
+        d = floor_d
+        while d <= today_d:
+            won = _day_is_won(goals_due_on(conn, d.isoformat()))
+            if won is None:
+                d += timedelta(days=1)
+                continue
+            run = run + 1 if won else 0
+            longest = max(longest, run)
+            d += timedelta(days=1)
+
+        d = day
+        while d >= floor_d:
+            won = _day_is_won(goals_due_on(conn, d.isoformat()))
+            if won is None:
+                d -= timedelta(days=1)
+                continue
+            if not won:
+                break
+            streak += 1
+            d -= timedelta(days=1)
 
     return {
         "streak": streak,
-        "longest": max(streak, _longest_streak(done)),
-        "today_complete": today_complete,
+        "longest": max(streak, longest),
+        "today_complete": bool(today_won),
         "today_done": today_done,
-        "today_total": len(goals_today),
+        "today_total": len(today_due),
     }
 
 
 def total_xp(conn: sqlite3.Connection) -> int:
-    """Lifetime count of completed goals -- no arbitrary point weighting."""
-    sync_goal_completion(conn)
+    """Lifetime count of completed goal-days -- no arbitrary point weighting."""
     row = conn.execute(
-        "SELECT COUNT(*) AS n FROM daily_goals WHERE completed_at IS NOT NULL"
+        "SELECT COUNT(*) AS n FROM goal_log WHERE completed_at IS NOT NULL"
     ).fetchone()
     return row["n"]

@@ -175,13 +175,17 @@ def build_epilog() -> str:
         "  idea edit 12 --unset-field owner    remove a field\n"
         "  idea show 12                        prints fields if the idea has any\n"
         "\n"
-        "Daily goals (tag existing ideas as today's targets):\n"
-        "  idea goal add 12 13                 tag ideas #12 and #13 as goals for today\n"
-        "  idea goal list                      show today's goals and completion\n"
-        "  idea goal remove 12                 untag idea #12 from today's goals\n"
-        "  idea goal streak                    show the current streak and lifetime xp\n"
-        "  A goal completes itself the moment that idea's status changes -- no\n"
-        "  separate 'done' command.\n"
+        "Goals (your own daily/one-off targets, optionally linked to an idea):\n"
+        "  idea goal add \"walk 10000 steps\" --recurring   a daily habit\n"
+        "  idea goal add \"draft the proposal\" --idea 12   a one-off step toward idea #12\n"
+        "  idea goal list                                  show today's due goals\n"
+        "  idea goal done 5                                mark goal #5 done for today\n"
+        "  idea goal undo 5                                unmark it\n"
+        "  idea goal stop 5                                stop a recurring goal (keeps history)\n"
+        "  idea goal remove 5                               delete a goal and its history\n"
+        "  idea goal streak                                 current streak and lifetime xp\n"
+        "  Completion is always self-reported -- a goal never derives 'done' from\n"
+        "  an idea's status, since most goals (like the steps example) have no idea.\n"
         "\n"
         "Bare `idea some text` (no subcommand) is shorthand for `idea capture some text`.\n"
         "move/delete/show accept multiple ids in one call. Run `idea <command> --help`\n"
@@ -274,38 +278,76 @@ def build_parser() -> argparse.ArgumentParser:
     add_json_flag(delete)
 
     goal = subparsers.add_parser(
-        "goal", help="daily goals: tag ideas as today's targets, track streaks",
+        "goal", help="goals: your own daily/one-off targets, optionally linked to an idea",
         description=(
-            "Tag existing ideas as goals for a day. A goal completes itself "
-            "automatically the moment that idea's status changes -- there's "
-            "no separate 'done' command."
+            "A goal is its own thing -- its own text, e.g. 'walk 10000 steps' -- "
+            "not a tagged idea. It can optionally point at an idea (a concrete "
+            "step toward that longer-term objective) but doesn't have to. "
+            "Completion is always self-reported (`goal done`/`goal undo`)."
         ),
     )
     add_json_flag(goal)  # so `idea goal` (no subcommand) can still report --json errors
     goal_sub = goal.add_subparsers(dest="goal_command", metavar="<goal-command>")
 
     goal_add = goal_sub.add_parser(
-        "add", help="tag one or more ideas as a goal for today (or --date)",
+        "add", help="create a new goal",
+        description=(
+            "Create a goal. Recurring goals are due every day until stopped; "
+            "one-off goals are due on a single date (default: today)."
+        ),
     )
-    goal_add.add_argument("ids", type=int, nargs="+", metavar="id")
-    goal_add.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
+    goal_add.add_argument(
+        "text", nargs="+",
+        help="the goal's own text (quote it, or leave unquoted), e.g. 'walk 10000 steps'",
+    )
+    goal_add.add_argument(
+        "--idea", type=int, metavar="id", dest="idea_id",
+        help="optionally link this goal to an existing idea",
+    )
+    goal_add.add_argument(
+        "--recurring", action="store_true",
+        help="due every day (a habit) instead of a single date",
+    )
+    goal_add.add_argument(
+        "--date", metavar="YYYY-MM-DD",
+        help="one-off target date (default: today; not valid with --recurring)",
+    )
     add_json_flag(goal_add)
 
-    goal_remove = goal_sub.add_parser(
-        "remove", help="untag one or more ideas from a day's goals",
+    goal_done = goal_sub.add_parser(
+        "done", help="mark one or more goals complete for a day",
     )
-    goal_remove.add_argument("ids", type=int, nargs="+", metavar="id")
-    goal_remove.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
-    add_json_flag(goal_remove)
+    goal_done.add_argument("ids", type=int, nargs="+", metavar="id")
+    goal_done.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
+    add_json_flag(goal_done)
+
+    goal_undo = goal_sub.add_parser(
+        "undo", help="unmark one or more goals as complete for a day",
+    )
+    goal_undo.add_argument("ids", type=int, nargs="+", metavar="id")
+    goal_undo.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
+    add_json_flag(goal_undo)
 
     goal_list = goal_sub.add_parser(
-        "list", help="show a day's goals and completion",
+        "list", help="show a day's due goals and completion",
     )
     goal_list.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
     add_json_flag(goal_list)
 
+    goal_stop = goal_sub.add_parser(
+        "stop", help="stop a recurring goal (keeps its history)",
+    )
+    goal_stop.add_argument("ids", type=int, nargs="+", metavar="id")
+    add_json_flag(goal_stop)
+
+    goal_remove = goal_sub.add_parser(
+        "remove", help="permanently delete one or more goals and their history",
+    )
+    goal_remove.add_argument("ids", type=int, nargs="+", metavar="id")
+    add_json_flag(goal_remove)
+
     goal_streak = goal_sub.add_parser(
-        "streak", help="show the current daily-goal streak and lifetime xp",
+        "streak", help="show the current streak and lifetime xp",
     )
     add_json_flag(goal_streak)
 
@@ -491,7 +533,7 @@ def cmd_delete(args) -> int:
         if missing:
             return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
         for idea_id in args.ids:
-            dbutil.remove_goals_for_idea(conn, idea_id)
+            dbutil.unlink_goals_from_idea(conn, idea_id)
         conn.executemany("DELETE FROM ideas WHERE id = ?", [(i,) for i in args.ids])
         conn.commit()
 
@@ -504,53 +546,120 @@ def cmd_delete(args) -> int:
     return 0
 
 
-def cmd_goal_add(args) -> int:
-    date = args.date or dbutil.today_str()
-    with dbutil.connection() as conn:
-        missing = missing_ids(conn, args.ids)
-        if missing:
-            return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
-        goals = [dbutil.add_goal(conn, idea_id, date) for idea_id in args.ids]
-
+def emit_goal(args, goal: dict, human_verb: str) -> None:
     if args.json:
-        print(json.dumps(goals[0] if len(goals) == 1 else goals))
+        print(json.dumps(goal))
+    else:
+        idea_note = f"  (linked to idea #{goal['idea_id']})" if goal["idea_id"] else ""
+        print(f"{human_verb} goal #{goal['id']}: {goal['text']}{idea_note}")
+
+
+def emit_goals(args, goals: list[dict], human_verb: str) -> None:
+    if len(goals) == 1:
+        emit_goal(args, goals[0], human_verb)
+        return
+    if args.json:
+        print(json.dumps(goals))
     else:
         for g in goals:
-            print(f"goal set for {g['date']}: idea #{g['idea_id']} [{g['status_at_tag']}] {g['idea_text_snapshot']}")
+            emit_goal(args, g, human_verb)
+
+
+def cmd_goal_add(args) -> int:
+    if args.recurring and args.date:
+        return fail(args, "--date doesn't apply to --recurring goals (they're due every day)")
+    text = " ".join(args.text).strip()
+    if not text:
+        return fail(args, "goal text cannot be empty")
+
+    with dbutil.connection() as conn:
+        if args.idea_id is not None and dbutil.get_idea(conn, args.idea_id) is None:
+            return fail(args, f"no idea with id {args.idea_id}")
+        goal = dbutil.create_goal(
+            conn, text, idea_id=args.idea_id, recurring=args.recurring, target_date=args.date,
+        )
+    emit_goal(args, goal, "created")
+    return 0
+
+
+def cmd_goal_done(args) -> int:
+    return _cmd_goal_set_done(args, done=True)
+
+
+def cmd_goal_undo(args) -> int:
+    return _cmd_goal_set_done(args, done=False)
+
+
+def _cmd_goal_set_done(args, done: bool) -> int:
+    date = args.date or dbutil.today_str()
+    with dbutil.connection() as conn:
+        missing = dbutil.missing_goal_ids(conn, args.ids)
+        if missing:
+            return fail(args, f"no goal(s) with id(s): {', '.join(map(str, missing))}")
+        results = [dbutil.set_goal_done(conn, goal_id, date, done) for goal_id in args.ids]
+
+    verb = "completed" if done else "un-completed"
+    if args.json:
+        print(json.dumps({"date": date, "goals": results}))
+    else:
+        for g in results:
+            note = "not due" if g is None else ("done" if g["completed_at"] else "not done")
+            print(f"{verb} goal #{'?' if g is None else g['id']} for {date}: {note}")
+    return 0
+
+
+def cmd_goal_stop(args) -> int:
+    with dbutil.connection() as conn:
+        missing = dbutil.missing_goal_ids(conn, args.ids)
+        if missing:
+            return fail(args, f"no goal(s) with id(s): {', '.join(map(str, missing))}")
+        stopped = [goal_id for goal_id in args.ids if dbutil.stop_goal(conn, goal_id)]
+
+    if not stopped:
+        return fail(args, "none of those goals are recurring (or they're already stopped)")
+    if args.json:
+        print(json.dumps({"stopped": stopped}))
+    else:
+        for goal_id in stopped:
+            print(f"stopped goal #{goal_id}")
     return 0
 
 
 def cmd_goal_remove(args) -> int:
-    date = args.date or dbutil.today_str()
     with dbutil.connection() as conn:
-        removed = [idea_id for idea_id in args.ids if dbutil.remove_goal(conn, idea_id, date)]
+        missing = dbutil.missing_goal_ids(conn, args.ids)
+        if missing:
+            return fail(args, f"no goal(s) with id(s): {', '.join(map(str, missing))}")
+        for goal_id in args.ids:
+            dbutil.remove_goal(conn, goal_id)
 
-    if not removed:
-        return fail(args, f"no goal(s) for {date} matching those id(s)")
     if args.json:
-        print(json.dumps({"date": date, "removed": removed}))
+        results = [{"deleted": True, "id": i} for i in args.ids]
+        print(json.dumps(results[0] if len(results) == 1 else results))
     else:
-        for idea_id in removed:
-            print(f"removed goal for {date}: idea #{idea_id}")
+        for goal_id in args.ids:
+            print(f"deleted goal #{goal_id}")
     return 0
 
 
 def cmd_goal_list(args) -> int:
     date = args.date or dbutil.today_str()
     with dbutil.connection() as conn:
-        goals = dbutil.goals_for_date(conn, date)
+        goals = dbutil.goals_due_on(conn, date)
 
     if args.json:
         print(json.dumps({"date": date, "goals": goals}))
         return 0
     if not goals:
-        print(f"no goals set for {date}")
+        print(f"no goals due {date}")
         return 0
     done = sum(1 for g in goals if g["completed_at"])
     print(f"{date}: {done}/{len(goals)} goals complete")
     for g in goals:
         mark = "x" if g["completed_at"] else " "
-        print(f"  [{mark}] idea #{g['idea_id']}: {g['idea_text_snapshot']}")
+        tag = "daily" if g["recurring"] else "one-off"
+        idea_note = f"  (idea #{g['idea_id']})" if g["idea_id"] else ""
+        print(f"  [{mark}] #{g['id']} ({tag}) {g['text']}{idea_note}")
     return 0
 
 
@@ -572,6 +681,9 @@ def cmd_goal_streak(args) -> int:
 
 GOAL_COMMANDS = {
     "add": cmd_goal_add,
+    "done": cmd_goal_done,
+    "undo": cmd_goal_undo,
+    "stop": cmd_goal_stop,
     "remove": cmd_goal_remove,
     "list": cmd_goal_list,
     "streak": cmd_goal_streak,
@@ -580,7 +692,11 @@ GOAL_COMMANDS = {
 
 def cmd_goal(args) -> int:
     if args.goal_command is None:
-        return fail(args, "missing goal subcommand: add/remove/list/streak (see `idea goal --help`)")
+        return fail(
+            args,
+            "missing goal subcommand: add/done/undo/stop/remove/list/streak "
+            "(see `idea goal --help`)",
+        )
     return GOAL_COMMANDS[args.goal_command](args)
 
 

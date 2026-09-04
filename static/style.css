@@ -113,57 +113,39 @@ body {
 .target-pill[data-status="frontier"].selected { color: var(--teal); border-color: var(--teal); }
 .target-pill[data-status="archive"].selected { color: var(--red); border-color: var(--red); }
 
-/* ---- daily goal readout: subtle, same palette, no new colors ---- */
+/* ---- goals toggle: compact button in the top bar, opens the side panel ---- */
 
-.goal-readout {
+.goals-toggle {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   font-family: var(--mono);
   font-size: 11px;
   color: var(--text-dim);
+  background: transparent;
   border: 1px solid var(--border-strong);
   border-radius: 3px;
   padding: 4px 10px;
   flex-shrink: 0;
+  cursor: pointer;
   white-space: nowrap;
 }
 
-.goal-streak.active {
-  color: var(--gold);
+.goals-toggle:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
 }
 
-.goal-today {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.goal-bar {
-  display: inline-block;
-  width: 40px;
-  height: 4px;
-  background: var(--border-strong);
+.goals-badge {
+  color: var(--text-dim);
+  border: 1px solid var(--border-strong);
   border-radius: 2px;
-  overflow: hidden;
+  padding: 0px 5px;
 }
 
-.goal-bar-fill {
-  display: block;
-  height: 100%;
-  width: 0%;
-  background: var(--gold);
-  transition: width 220ms ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .goal-bar-fill {
-    transition: none;
-  }
-}
-
-.goal-today[hidden] {
-  display: none;
+.goals-badge.complete {
+  color: var(--gold);
+  border-color: var(--gold);
 }
 
 .mode-indicator {
@@ -355,32 +337,6 @@ body {
 .card[data-status="frontier"] .card-status-tag { color: var(--teal); border-color: rgba(92, 139, 133, 0.55); }
 .card[data-status="archive"] .card-status-tag { color: var(--red); border-color: var(--red); }
 
-.goal-marker {
-  font-family: var(--mono);
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 2px;
-  border: 1px solid var(--border-strong);
-  color: var(--text-dim);
-  cursor: pointer;
-  margin-right: 4px;
-}
-
-.goal-marker.tagged {
-  color: var(--teal);
-  border-color: var(--teal);
-}
-
-.goal-marker.done {
-  color: var(--gold);
-  border-color: var(--gold);
-}
-
-.goal-marker:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
-}
-
 .empty-hint {
   font-size: 12px;
   color: var(--text-dim);
@@ -392,6 +348,226 @@ body {
    changes column -- is driven from app.js via the FLIP technique. It
    checks prefers-reduced-motion itself and skips the animation there,
    so no motion-related rule is needed in this stylesheet. */
+
+/* ---- goals panel: dedicated side drawer, toggled by the top-bar button
+   or 'g'. Docked alongside the board (no backdrop) so board shortcuts and
+   drag-and-drop keep working while it's open; opens/closes instantly, no
+   transition -- the FLIP card slide stays the only deliberate motion. ---- */
+
+.goals-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  max-width: 90vw;
+  background: var(--panel);
+  border-left: 1px solid var(--border-strong);
+  padding: 16px;
+  overflow-y: auto;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.goals-panel[hidden] {
+  display: none;
+}
+
+.goals-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.goals-panel-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.goals-panel-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.goals-panel-close:hover {
+  color: var(--text);
+}
+
+.goals-stats {
+  display: flex;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.goals-stats .active {
+  color: var(--gold);
+}
+
+.goal-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.goal-add-form input[type="text"] {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  padding: 7px 9px;
+  border-radius: 3px;
+  outline: none;
+}
+
+.goal-add-form input[type="text"]:focus {
+  border-color: var(--gold);
+}
+
+.goal-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.goal-add-recurring {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.goal-add-row select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 5px 6px;
+  border-radius: 3px;
+}
+
+.goal-add-submit {
+  background: transparent;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.goal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goal-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.goal-row.done {
+  border-color: rgba(201, 161, 91, 0.4);
+}
+
+.goal-check {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  cursor: pointer;
+  accent-color: var(--gold);
+}
+
+.goal-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.goal-row-text {
+  font-size: 13px;
+  color: var(--text);
+  word-wrap: break-word;
+}
+
+.goal-row.done .goal-row-text {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
+.goal-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.goal-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 5px;
+}
+
+.goal-tag.idea-link {
+  color: var(--teal);
+  border-color: var(--teal);
+  cursor: pointer;
+}
+
+.goal-row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.goal-row-actions button {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.goal-row-actions button:hover {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.goals-empty-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.7;
+}
 
 /* ---- detail modal ---- */
 

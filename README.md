@@ -113,33 +113,53 @@ JSON API accepts/returns the same shape: `POST`/`PATCH .../api/ideas` take an
 optional `"fields": {...}` object (PATCH replaces the whole object when
 given), and every idea in `GET /api/ideas` includes `"fields"`.
 
-**Daily goals** — tag any existing idea as a target for a given day (default:
-today). A goal completes itself automatically the moment that idea's status
-changes -- there's no separate "done" command or checkbox to keep in sync;
-tagging just snapshots the idea's current status, and any move away from it
-counts as progress. History is persisted, so there's a real streak (an
-unfinished today doesn't break it, it's just not counted yet) and a lifetime
-xp count (total completed goals, no arbitrary point weighting).
+**Goals** — a goal is its own thing, with its own text (`"walk 10000 steps"`),
+separate from ideas. Ideas are the long-term objectives; goals are the
+concrete steps you take toward one, day to day -- so a goal can *optionally*
+link to an idea (`"run 5k"` → the idea `"run every day"`), but plenty of
+goals won't link to anything at all. A goal is either:
+
+- **recurring** — due every day (a habit) until you stop it; history from
+  before you stopped it is kept
+- **one-off** — due on a single date (default: today)
+
+Completion is always **self-reported** — you check a goal off yourself, in
+the CLI or the GUI. It is never derived from an idea's status, since most
+goals (the steps example) have no status to derive from. History is
+persisted, so there's a real streak (an unfinished today doesn't break it,
+it's just not counted yet, and a day with nothing due is skipped rather than
+counted as a miss) and a lifetime xp count (total completed goal-days, no
+arbitrary point weighting).
 
 ```
-idea goal add 12 13                 tag ideas #12 and #13 as goals for today
-idea goal list                      show today's goals and completion
-idea goal remove 12                 untag idea #12 from today's goals
-idea goal streak                    show the current streak and lifetime xp
-idea goal add 12 --date 2026-09-01  tag a goal for a specific day
+idea goal add "walk 10000 steps" --recurring        a daily habit, no idea link
+idea goal add "draft the proposal" --idea 12         a one-off step toward idea #12
+idea goal list                                       show today's due goals
+idea goal done 5                                     mark goal #5 done for today
+idea goal undo 5                                     unmark it
+idea goal stop 5                                     stop a recurring goal (keeps history)
+idea goal remove 5                                   delete a goal and its history
+idea goal streak                                     current streak and lifetime xp
 ```
 
-The same thing from the GUI: press `g` to toggle today's goal on the
-focused/selected card(s), or click a card's `goal` pill directly. It turns
-`done` (gold) the moment the idea's status changes. The top bar shows a
-compact `streak Nd · today x/y · Nxp` readout next to the mode indicator.
-Deleting an idea removes any goal rows pointing at it (CLI, GUI, and the
-JSON API `DELETE /api/ideas/<id>` all cascade) -- a goal that could never
-complete would otherwise silently freeze the streak.
+The same thing from the GUI lives in its own panel, separate from the idea
+board: press `g` (or click the `goals` button in the top bar) to open it.
+Add a goal with optional "daily" and idea-link controls, check items off,
+and `stop`/delete existing ones. The top-bar button shows a compact `x/y`
+badge (gold once today's goals are all done) so you can see progress without
+opening the panel. The panel is a non-blocking side drawer -- the board
+underneath stays fully usable (keyboard shortcuts, drag-and-drop) while it's
+open.
 
-JSON API: `GET /api/goals?date=` (default today), `POST /api/goals
-{"idea_id": ...}`, `DELETE /api/goals/<idea_id>?date=`, `GET
-/api/goals/streak`.
+Deleting an idea that a goal links to **unlinks** it rather than deleting the
+goal -- the goal and its history are independent of the idea's lifecycle, so
+they survive (CLI, GUI, and the JSON API `DELETE /api/ideas/<id>` all do
+this).
+
+JSON API: `GET /api/goals?date=` (today's due goals, default today),
+`POST /api/goals {"text": ..., "idea_id": ..., "recurring": ..., "target_date": ...}`,
+`PATCH /api/goals/<id> {"completed": true/false, "date": ...}`,
+`POST /api/goals/<id>/stop`, `DELETE /api/goals/<id>`, `GET /api/goals/streak`.
 
 **GUI** — `server.py` serves `static/index.html` and a small JSON API
 (`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`, plus the goals routes
@@ -160,17 +180,17 @@ ground as the CLI, keyboard-first:
   motion in the UI, skipped automatically under `prefers-reduced-motion`;
   moving more than one at once re-renders directly instead, since several
   simultaneous slides across columns read as noise, not signal.
-- `g` toggles today's daily goal on the focused (or selected) card(s) — see
-  **Daily goals** above.
+- `g` opens/closes the **goals panel** — see **Goals** above. It's a separate
+  view from the board, not a per-card action.
 - `e` edits the focused card's text in place (Enter saves, Escape cancels,
   clicking away saves) — the GUI equivalent of `idea edit`.
 - `d` (or Delete/Backspace) deletes the selected card(s), after a confirm
   prompt — the GUI equivalent of `idea delete`. Cannot be undone.
 - `v` toggles range-select ("visual mode", vim-style): `j`/`k` extend the
   range from wherever `v` was pressed, a status bar shows the count, and
-  `a`/`q`/`h`/`f`/`x`/`g`/`d` then apply to every selected card at once — the
-  GUI equivalent of the CLI's batch `move`/`goal add`/`delete`. `Escape`
-  cancels back to a single selection.
+  `a`/`q`/`h`/`f`/`x`/`d` then apply to every selected card at once — the GUI
+  equivalent of the CLI's batch `move`/`delete`. `Escape` cancels back to a
+  single selection (or, if the goals panel is open, closes that first).
 - **Enter** (or double-click, or drag) opens the focused card's **detail
   view** — a modal with the full text (editable), status (as pills), every
   structured field (editable, with an "add field" row), freeform notes, and
@@ -288,12 +308,21 @@ you're ready to touch that file.
   column order (Inbox → Active → Queued → Horizon → Frontier → Archive), not
   just within one column, since the brief didn't specify and this keeps a
   single mental model for "next/previous idea."
-- **Goal completion is derived, not set.** A daily goal snapshots the idea's
-  status at tag time; `dbutil.sync_goal_completion()` stamps it done the
-  moment the live status differs, computed lazily on every goal read rather
-  than hooked into each of the several status-change code paths (CLI `move`,
-  the JSON API's `PATCH`, drag-and-drop, the detail modal). One source of
-  truth instead of four call sites that could drift out of sync.
+- **Goals are separate from ideas, not tags on them.** The first cut of this
+  feature tagged existing ideas as goals and derived completion from their
+  status. That didn't fit goals with no natural idea behind them (a step
+  count, say), so goals became their own record -- own text, an *optional*
+  idea link, self-reported completion (`goal done`/`goal undo`) instead of
+  anything derived from status. The live database had to be migrated off
+  the old `daily_goals` table (`dbutil._migrate_from_v1_daily_goals`) as
+  part of this change; it shipped empty in every real install, so the
+  migration drops it outright rather than trying to translate old rows into
+  the new shape.
+- **Streak math skips days with nothing due rather than penalizing them.**
+  `dbutil.compute_streak()` walks backward from today; a day before any goal
+  existed, or after every goal covering it was stopped, neither extends nor
+  breaks the streak. Only a day where something was due and wasn't
+  completed breaks it.
 - **Corruption heuristics for migration** are pattern-based (blank text,
   shell-history/path markers) rather than hardcoded to the two known bad
   lines, so the script stays useful if `inbox.md` grows more such lines

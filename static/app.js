@@ -9,10 +9,10 @@ let visualAnchorId = null; // non-null while range-select ("visual") mode is act
 let editingId = null; // id of the card currently being text-edited, if any
 let captureTargetStatus = "inbox";
 
-// idea_id -> today's goal row, if tagged. A goal completes itself the
-// moment its idea's status differs from status_at_tag (see dbutil.py) --
-// the GUI never sets completed_at directly, only tags/untags.
-let goalsToday = new Map();
+// A goal is its own thing (own text, optionally linked to an idea) --
+// completion is always self-reported by the user in the goals panel, never
+// derived from an idea's status. See dbutil.py's "goals" section.
+let todaysGoals = [];
 let streakInfo = { streak: 0, longest: 0, today_complete: false, today_done: 0, today_total: 0, xp: 0 };
 
 const captureForm = document.getElementById("capture-form");
@@ -80,21 +80,10 @@ function buildCard(idea) {
   time.className = "card-time";
   time.textContent = relativeTime(idea.updated_at);
 
-  const goal = goalsToday.get(idea.id);
-  const goalMarker = document.createElement("span");
-  goalMarker.className = "goal-marker" + (goal ? (goal.completed_at ? " done" : " tagged") : "");
-  goalMarker.textContent = goal ? (goal.completed_at ? "done" : "goal") : "goal";
-  goalMarker.title = goal ? "tagged as today's goal -- click to untag" : "tag as today's goal";
-  goalMarker.addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggleGoalForIdea(idea.id);
-  });
-
   const tag = document.createElement("span");
   tag.className = "card-status-tag";
   tag.textContent = idea.status;
   meta.appendChild(time);
-  meta.appendChild(goalMarker);
   meta.appendChild(tag);
   card.appendChild(meta);
 
@@ -182,7 +171,7 @@ function updateSelectionClasses() {
 
 function updateModeIndicator() {
   if (visualAnchorId !== null && selectedIds.size > 1) {
-    modeIndicator.textContent = `${selectedIds.size} selected — a/q/h/x/d apply to all, Esc cancels`;
+    modeIndicator.textContent = `${selectedIds.size} selected — a/q/h/f/x/d apply to all, Esc cancels`;
     modeIndicator.hidden = false;
   } else {
     modeIndicator.hidden = true;
@@ -260,85 +249,187 @@ async function fetchIdeas() {
   }
 }
 
-// ---- daily goals: subtle streak/xp readout in the top bar ----
+// ---- goals panel: dedicated view, separate from the idea board ----
 
-async function fetchGoalState() {
+const goalsPanel = document.getElementById("goals-panel");
+const goalsToggle = document.getElementById("goals-toggle");
+const goalsBadge = document.getElementById("goals-badge");
+const goalAddForm = document.getElementById("goal-add-form");
+const goalAddText = document.getElementById("goal-add-text");
+const goalAddRecurring = document.getElementById("goal-add-recurring");
+const goalAddIdea = document.getElementById("goal-add-idea");
+const goalListEl = document.getElementById("goal-list");
+
+async function fetchGoalsData() {
   const [goalsRes, streakRes] = await Promise.all([
     fetch("/api/goals"),
     fetch("/api/goals/streak"),
   ]);
   const goalsPayload = await goalsRes.json();
+  todaysGoals = goalsPayload.goals;
   streakInfo = await streakRes.json();
-  goalsToday = new Map(goalsPayload.goals.map((g) => [g.idea_id, g]));
-  renderGoalReadout();
-  // deliberately doesn't re-render the board here: a status change calls
-  // this mid-FLIP-animation (see moveIdeaAnimated), and rebuilding card DOM
-  // would cut the slide short. Card goal markers pick up the latest state
-  // on the next render() a user action triggers anyway.
+  renderGoalsBadge();
+  if (!goalsPanel.hidden) renderGoalsPanel();
 }
 
-function renderGoalReadout() {
-  const streakEl = document.getElementById("goal-streak");
-  const labelEl = document.getElementById("goal-today-label");
-  const fillEl = document.getElementById("goal-bar-fill");
-  const xpEl = document.getElementById("goal-xp");
+function renderGoalsBadge() {
+  goalsBadge.textContent = `${streakInfo.today_done}/${streakInfo.today_total}`;
+  goalsBadge.classList.toggle("complete", streakInfo.today_complete);
+}
 
-  streakEl.textContent = `streak ${streakInfo.streak}d`;
-  streakEl.classList.toggle("active", streakInfo.streak > 0);
-  xpEl.textContent = `${streakInfo.xp}xp`;
+function populateGoalIdeaSelect() {
+  const previous = goalAddIdea.value;
+  goalAddIdea.innerHTML = '<option value="">no linked idea</option>';
+  for (const idea of ideas) {
+    const opt = document.createElement("option");
+    opt.value = idea.id;
+    opt.textContent = idea.text.length <= 40 ? idea.text : idea.text.slice(0, 37) + "...";
+    goalAddIdea.appendChild(opt);
+  }
+  goalAddIdea.value = previous;
+}
 
-  if (streakInfo.today_total === 0) {
-    labelEl.textContent = "no goals today";
-    fillEl.style.width = "0%";
-  } else {
-    labelEl.textContent = `today ${streakInfo.today_done}/${streakInfo.today_total}`;
-    fillEl.style.width = `${Math.round((streakInfo.today_done / streakInfo.today_total) * 100)}%`;
+function renderGoalsPanel() {
+  document.getElementById("goal-streak").textContent = `streak ${streakInfo.streak}d`;
+  document.getElementById("goal-streak").classList.toggle("active", streakInfo.streak > 0);
+  document.getElementById("goal-longest").textContent = `best ${streakInfo.longest}d`;
+  document.getElementById("goal-xp").textContent = `${streakInfo.xp}xp`;
+
+  goalListEl.innerHTML = "";
+  if (todaysGoals.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "goals-empty-hint";
+    hint.textContent = "no goals due today -- add one below";
+    goalListEl.appendChild(hint);
+    return;
+  }
+
+  for (const goal of todaysGoals) {
+    goalListEl.appendChild(buildGoalRow(goal));
   }
 }
 
-// targeted DOM patch for one card's marker -- used after a status change so
-// the "done" state appears without a full render() interrupting the FLIP
-// slide that triggered it (see moveIdeaAnimated)
-function updateCardGoalMarker(id) {
-  const markerEl = document.querySelector(`.card[data-id="${id}"] .goal-marker`);
-  if (!markerEl) return;
-  const goal = goalsToday.get(id);
-  markerEl.className = "goal-marker" + (goal ? (goal.completed_at ? " done" : " tagged") : "");
-  markerEl.textContent = goal ? (goal.completed_at ? "done" : "goal") : "goal";
-  markerEl.title = goal ? "tagged as today's goal -- click to untag" : "tag as today's goal";
-}
+function buildGoalRow(goal) {
+  const row = document.createElement("div");
+  row.className = "goal-row" + (goal.completed_at ? " done" : "");
 
-async function setGoalTagged(id, tagged) {
-  if (tagged) {
-    await fetch("/api/goals", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ idea_id: id }),
+  const check = document.createElement("input");
+  check.type = "checkbox";
+  check.className = "goal-check";
+  check.checked = Boolean(goal.completed_at);
+  check.addEventListener("change", () => setGoalDone(goal.id, check.checked));
+
+  const body = document.createElement("div");
+  body.className = "goal-row-body";
+
+  const text = document.createElement("div");
+  text.className = "goal-row-text";
+  text.textContent = goal.text;
+  body.appendChild(text);
+
+  const meta = document.createElement("div");
+  meta.className = "goal-row-meta";
+
+  const recurTag = document.createElement("span");
+  recurTag.className = "goal-tag";
+  recurTag.textContent = goal.recurring ? "daily" : "one-off";
+  meta.appendChild(recurTag);
+
+  const linkedIdea = goal.idea_id ? ideas.find((i) => i.id === goal.idea_id) : null;
+  if (linkedIdea) {
+    const ideaTag = document.createElement("span");
+    ideaTag.className = "goal-tag idea-link";
+    ideaTag.textContent = linkedIdea.text.length <= 24 ? linkedIdea.text : linkedIdea.text.slice(0, 21) + "...";
+    ideaTag.title = "jump to this idea on the board";
+    ideaTag.addEventListener("click", () => {
+      closeGoalsPanel();
+      selectCard(linkedIdea.id);
     });
-  } else {
-    await fetch(`/api/goals/${id}`, { method: "DELETE" });
+    meta.appendChild(ideaTag);
   }
+  body.appendChild(meta);
+
+  const actions = document.createElement("div");
+  actions.className = "goal-row-actions";
+  if (goal.recurring) {
+    const stopBtn = document.createElement("button");
+    stopBtn.type = "button";
+    stopBtn.textContent = "stop";
+    stopBtn.title = "stop this recurring goal (keeps its history)";
+    stopBtn.addEventListener("click", () => stopGoal(goal.id));
+    actions.appendChild(stopBtn);
+  }
+  const removeBtn = document.createElement("button");
+  removeBtn.type = "button";
+  removeBtn.textContent = "×";
+  removeBtn.title = "delete this goal and its history";
+  removeBtn.addEventListener("click", () => removeGoal(goal.id));
+  actions.appendChild(removeBtn);
+
+  row.appendChild(check);
+  row.appendChild(body);
+  row.appendChild(actions);
+  return row;
 }
 
-async function toggleGoalForIdea(id) {
-  await setGoalTagged(id, !goalsToday.has(id));
-  await fetchGoalState();
-  render();
-  updateSelectionClasses();
+async function setGoalDone(goalId, completed) {
+  await fetch(`/api/goals/${goalId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ completed }),
+  });
+  await fetchGoalsData();
 }
 
-// batch g: if every selected card is already tagged, untag them all;
-// otherwise tag whichever aren't yet (fills the gaps rather than toggling
-// each independently, so one keypress reaches a consistent end state)
-async function toggleGoalForSelected() {
-  const ids = Array.from(selectedIds);
-  if (ids.length === 0) return;
-  const allTagged = ids.every((id) => goalsToday.has(id));
-  await Promise.allSettled(ids.map((id) => setGoalTagged(id, !allTagged)));
-  await fetchGoalState();
-  render();
-  updateSelectionClasses();
+async function stopGoal(goalId) {
+  await fetch(`/api/goals/${goalId}/stop`, { method: "POST" });
+  await fetchGoalsData();
 }
+
+async function removeGoal(goalId) {
+  if (!window.confirm("Delete this goal and its history? This can't be undone.")) return;
+  await fetch(`/api/goals/${goalId}`, { method: "DELETE" });
+  await fetchGoalsData();
+}
+
+goalAddForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = goalAddText.value.trim();
+  if (!text) return;
+  const payload = { text, recurring: goalAddRecurring.checked };
+  if (goalAddIdea.value) payload.idea_id = Number(goalAddIdea.value);
+
+  const res = await fetch("/api/goals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) return;
+
+  goalAddText.value = "";
+  goalAddRecurring.checked = false;
+  goalAddIdea.value = "";
+  await fetchGoalsData();
+  goalAddText.focus();
+});
+
+function openGoalsPanel() {
+  goalsPanel.hidden = false;
+  populateGoalIdeaSelect();
+  renderGoalsPanel();
+}
+
+function closeGoalsPanel() {
+  goalsPanel.hidden = true;
+}
+
+function toggleGoalsPanel() {
+  if (goalsPanel.hidden) openGoalsPanel();
+  else closeGoalsPanel();
+}
+
+goalsToggle.addEventListener("click", toggleGoalsPanel);
+document.getElementById("goals-panel-close").addEventListener("click", closeGoalsPanel);
 
 async function createIdea(text, status) {
   const res = await fetch("/api/ideas", {
@@ -398,7 +489,6 @@ async function moveIdeaAnimated(id, status) {
   try {
     const updated = await patchIdea(id, { status });
     Object.assign(idea, updated);
-    fetchGoalState().then(() => updateCardGoalMarker(id)); // a status change may have just completed a goal
   } catch (err) {
     console.error("failed to move idea, reverting", err);
     idea.status = prevStatus;
@@ -426,7 +516,6 @@ async function applyStatusToSelected(status) {
       }
     });
     render();
-    fetchGoalState().then(() => ids.forEach(updateCardGoalMarker));
   }
 
   exitVisualMode();
@@ -451,7 +540,7 @@ async function deleteSelected() {
   ideas = ideas.filter((i) => !deletedIds.has(i.id));
   visualAnchorId = null;
   render();
-  fetchGoalState(); // server cascades goal rows on delete
+  fetchGoalsData(); // any goal linked to a deleted idea just loses that link
 
   if (flatOrder.length > 0) {
     const nextIndex = Math.min(Math.max(priorIndex, 0), flatOrder.length - 1);
@@ -651,7 +740,6 @@ async function closeModal(save) {
     Object.assign(idea, updated);
     render();
     updateSelectionClasses();
-    if (payload.status) fetchGoalState().then(() => updateCardGoalMarker(id)); // may have just completed a goal
   } catch (err) {
     console.error("failed to save idea", err);
   }
@@ -679,7 +767,7 @@ document.getElementById("modal-delete").addEventListener("click", async () => {
   }
   ideas = ideas.filter((i) => i.id !== id);
   render();
-  fetchGoalState(); // server cascades goal rows on delete
+  fetchGoalsData(); // any goal linked to a deleted idea just loses that link
   if (flatOrder.length > 0) {
     selectCard(flatOrder[0]);
   } else {
@@ -767,7 +855,7 @@ document.addEventListener("keydown", (e) => {
       applyStatusToSelected("frontier");
       break;
     case "g":
-      toggleGoalForSelected();
+      toggleGoalsPanel();
       break;
     case "v":
       toggleVisualMode();
@@ -787,7 +875,8 @@ document.addEventListener("keydown", (e) => {
       deleteSelected();
       break;
     case "Escape":
-      if (visualAnchorId !== null) exitVisualMode();
+      if (!goalsPanel.hidden) closeGoalsPanel();
+      else if (visualAnchorId !== null) exitVisualMode();
       break;
     case "/":
       e.preventDefault();
@@ -813,7 +902,4 @@ setInterval(() => {
 }, 30000);
 
 fetchIdeas();
-fetchGoalState().then(() => {
-  render(); // picks up each card's goal marker once the first fetch lands
-  updateSelectionClasses();
-});
+fetchGoalsData();

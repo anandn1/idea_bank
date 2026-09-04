@@ -25,19 +25,15 @@
     <button type="button" class="target-pill" data-status="frontier">frontier</button>
     <button type="button" class="target-pill" data-status="archive">archive</button>
   </div>
-  <div class="goal-readout" id="goal-readout" aria-label="daily goal progress">
-    <span class="goal-streak" id="goal-streak">streak 0d</span>
-    <span class="goal-today" id="goal-today">
-      <span class="goal-today-label" id="goal-today-label">no goals today</span>
-      <span class="goal-bar"><span class="goal-bar-fill" id="goal-bar-fill"></span></span>
-    </span>
-    <span class="goal-xp" id="goal-xp">0xp</span>
-  </div>
+  <button type="button" class="goals-toggle" id="goals-toggle" aria-label="open goals panel">
+    <span>goals</span>
+    <span class="goals-badge" id="goals-badge">0/0</span>
+  </button>
   <div class="mode-indicator" id="mode-indicator" hidden></div>
   <div class="help">
     <span><b>j/k</b> move</span>
     <span><b>a/q/h/f/x</b> move idea</span>
-    <span><b>g</b> daily goal</span>
+    <span><b>g</b> goals panel</span>
     <span><b>↵</b> open</span>
     <span><b>e</b> quick edit</span>
     <span><b>v</b> select range</span>
@@ -72,6 +68,30 @@
     <div class="cards" id="cards-archive"></div>
   </section>
 </main>
+
+<aside class="goals-panel" id="goals-panel" hidden aria-label="daily goals">
+  <div class="goals-panel-header">
+    <h2>Goals</h2>
+    <button type="button" class="goals-panel-close" id="goals-panel-close" aria-label="close">×</button>
+  </div>
+
+  <div class="goals-stats">
+    <span id="goal-streak">streak 0d</span>
+    <span id="goal-longest">best 0d</span>
+    <span id="goal-xp">0xp</span>
+  </div>
+
+  <form class="goal-add-form" id="goal-add-form" autocomplete="off">
+    <input type="text" id="goal-add-text" placeholder="new goal, e.g. walk 10000 steps">
+    <div class="goal-add-row">
+      <label class="goal-add-recurring"><input type="checkbox" id="goal-add-recurring"> daily</label>
+      <select id="goal-add-idea"><option value="">no linked idea</option></select>
+      <button type="submit" class="goal-add-submit">add</button>
+    </div>
+  </form>
+
+  <div class="goal-list" id="goal-list"></div>
+</aside>
 
 <div class="modal-backdrop" id="modal-backdrop" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-label="idea detail">
