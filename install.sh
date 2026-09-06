@@ -50,6 +50,13 @@ sed "s|@PROJECT_DIR@|$PROJECT_DIR|g" "$PROJECT_DIR/desktop/idea-bank.desktop.tem
     > "$DESKTOP_APPS_DIR/idea-bank.desktop"
 update-desktop-database "$DESKTOP_APPS_DIR" 2>/dev/null || true
 
+if [ -d "$HOME/Desktop" ]; then
+    echo "==> adding a shortcut on the Desktop"
+    cp "$DESKTOP_APPS_DIR/idea-bank.desktop" "$HOME/Desktop/idea-bank.desktop"
+    chmod +x "$HOME/Desktop/idea-bank.desktop"
+    gio set "$HOME/Desktop/idea-bank.desktop" "metadata::trusted" true 2>/dev/null || true
+fi
+
 echo ""
 echo "==> done."
 echo "    GUI:        http://127.0.0.1:8420/  (or click 'idea bank' in your app menu)"
