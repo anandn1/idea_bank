@@ -37,7 +37,8 @@ def write_inbox(module, content):
 def all_ideas():
     conn = dbutil.get_conn()
     rows = [
-        dict(row) for row in conn.execute("SELECT text, status, created_at FROM ideas")
+        {**dict(row), "text": dbutil.decrypt_str(row["text"])}
+        for row in conn.execute("SELECT text, status, created_at FROM ideas")
     ]
     conn.close()
     return rows
@@ -46,7 +47,8 @@ def all_ideas():
 def flagged_reasons():
     conn = dbutil.get_conn()
     reasons = [
-        row["reason"] for row in conn.execute("SELECT reason FROM flagged_imports")
+        dbutil.decrypt_str(row["reason"])
+        for row in conn.execute("SELECT reason FROM flagged_imports")
     ]
     conn.close()
     return reasons

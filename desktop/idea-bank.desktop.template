@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=idea bank
+Comment=Capture and manage your ideas and goals
+Exec=@PROJECT_DIR@/desktop/launch.sh
+Icon=text-x-generic
+Terminal=false
+Categories=Utility;Office;
+StartupNotify=true

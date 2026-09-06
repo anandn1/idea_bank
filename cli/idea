@@ -505,25 +505,19 @@ def cmd_edit(args) -> int:
         if idea is None:
             return fail(args, f"no idea with id {args.id}")
 
-        set_clauses, values = ["updated_at = ?"], [dbutil.now_str()]
+        if text is not None and not text:
+            return fail(args, "idea text cannot be empty")
 
+        kwargs = {}
         if text is not None:
-            if not text:
-                return fail(args, "idea text cannot be empty")
-            set_clauses.append("text = ?")
-            values.append(text)
-
+            kwargs["text"] = text
         if field_updates or unset_fields:
             merged = {**idea["fields"], **field_updates}
             for key in unset_fields:
                 merged.pop(key, None)
-            set_clauses.append("fields = ?")
-            values.append(dbutil.encode_fields(merged))
+            kwargs["fields"] = merged
 
-        values.append(args.id)
-        conn.execute(f"UPDATE ideas SET {', '.join(set_clauses)} WHERE id = ?", values)
-        conn.commit()
-        emit_idea(args, dbutil.get_idea(conn, args.id), "edited")
+        emit_idea(args, dbutil.update_idea(conn, args.id, kwargs), "edited")
     return 0
 
 

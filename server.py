@@ -23,6 +23,15 @@ def list_ideas():
         return jsonify([dbutil.row_to_idea(row) for row in rows])
 
 
+@app.get("/api/ideas/<int:idea_id>")
+def get_idea_route(idea_id):
+    with dbutil.connection() as conn:
+        idea = dbutil.get_idea(conn, idea_id)
+        if idea is None:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(idea)
+
+
 @app.post("/api/ideas")
 def create_idea():
     payload = request.get_json(silent=True) or {}
@@ -44,50 +53,39 @@ def create_idea():
 
 
 @app.patch("/api/ideas/<int:idea_id>")
-def update_idea(idea_id):
+def update_idea_route(idea_id):
     payload = request.get_json(silent=True) or {}
     with dbutil.connection() as conn:
         if dbutil.get_idea(conn, idea_id) is None:
             return jsonify({"error": "not found"}), 404
 
-        set_clauses, values = [], []
+        kwargs = {}
 
         if "status" in payload:
             status = payload["status"]
             if status not in dbutil.STATUSES:
                 return jsonify({"error": f"invalid status: {status}"}), 400
-            set_clauses.append("status = ?")
-            values.append(status)
+            kwargs["status"] = status
 
         if "text" in payload:
             text = (payload["text"] or "").strip()
             if not text:
                 return jsonify({"error": "text cannot be empty"}), 400
-            set_clauses.append("text = ?")
-            values.append(text)
+            kwargs["text"] = text
 
         if "notes" in payload:
-            set_clauses.append("notes = ?")
-            values.append(payload["notes"])
+            kwargs["notes"] = payload["notes"]
 
         if "fields" in payload:
             idea_fields = payload["fields"]
             if idea_fields is not None and not isinstance(idea_fields, dict):
                 return jsonify({"error": "fields must be an object"}), 400
-            set_clauses.append("fields = ?")
-            values.append(dbutil.encode_fields(idea_fields))
+            kwargs["fields"] = idea_fields
 
-        if not set_clauses:
+        if not kwargs:
             return jsonify({"error": "no updatable fields provided"}), 400
 
-        set_clauses.append("updated_at = ?")
-        values.append(dbutil.now_str())
-        values.append(idea_id)
-
-        conn.execute(f"UPDATE ideas SET {', '.join(set_clauses)} WHERE id = ?", values)
-        conn.commit()
-
-        return jsonify(dbutil.get_idea(conn, idea_id))
+        return jsonify(dbutil.update_idea(conn, idea_id, kwargs))
 
 
 @app.delete("/api/ideas/<int:idea_id>")

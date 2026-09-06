@@ -19,6 +19,46 @@ const captureForm = document.getElementById("capture-form");
 const captureInput = document.getElementById("capture-input");
 const modeIndicator = document.getElementById("mode-indicator");
 
+// ---- theme: dark / light / system, cycled by the top-bar toggle and
+// persisted in localStorage. "system" means no explicit override at all --
+// style.css's prefers-color-scheme block takes it from there.
+const THEME_ORDER = ["dark", "light", "system"];
+const THEME_STORAGE_KEY = "idea-bank-theme";
+const themeToggle = document.getElementById("theme-toggle");
+const themeToggleLabel = document.getElementById("theme-toggle-label");
+
+function applyTheme(theme) {
+  if (theme === "system") {
+    delete document.documentElement.dataset.theme;
+  } else {
+    document.documentElement.dataset.theme = theme;
+  }
+  themeToggleLabel.textContent = `theme: ${theme}`;
+}
+
+function loadTheme() {
+  let stored = null;
+  try {
+    stored = localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    // localStorage unavailable (private browsing, etc.) -- just defaults below
+  }
+  applyTheme(THEME_ORDER.includes(stored) ? stored : "dark");
+}
+
+themeToggle.addEventListener("click", () => {
+  const current = document.documentElement.dataset.theme || "system";
+  const next = THEME_ORDER[(THEME_ORDER.indexOf(current) + 1) % THEME_ORDER.length];
+  applyTheme(next);
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, next);
+  } catch {
+    // won't persist across reloads, but the click still applies visually
+  }
+});
+
+loadTheme();
+
 function relativeTime(dbTimestamp) {
   const date = new Date(dbTimestamp.replace(" ", "T"));
   const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
@@ -749,6 +789,13 @@ document.getElementById("modal-close").addEventListener("click", () => closeModa
 document.getElementById("modal-done").addEventListener("click", () => closeModal(true));
 modalBackdrop.addEventListener("click", (e) => {
   if (e.target === modalBackdrop) closeModal(true);
+});
+
+document.getElementById("modal-popout").addEventListener("click", () => {
+  if (modalIdeaId === null) return;
+  // a per-id window name so popping out several ideas opens separate
+  // windows instead of one replacing another
+  window.open(`/idea.html?id=${modalIdeaId}`, `idea-${modalIdeaId}`, "width=560,height=680");
 });
 
 document.getElementById("modal-delete").addEventListener("click", async () => {

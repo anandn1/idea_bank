@@ -1,14 +1,38 @@
 """Shared SQLite access for idea-bank-v2 (server, CLI, and scripts).
 
-Kept dependency-free (stdlib only) so the CLI works without the venv active.
+The only non-stdlib dependency is `cryptography`, used for encrypting
+free-text content at rest (see the "privacy" section below). It's listed in
+requirements.txt (installed into .venv by install.sh) and is needed by the
+CLI too, which runs on the system python3, not the venv -- so if it's not
+on the system path either, fall back to .venv's copy rather than requiring
+every machine to have it installed system-wide.
 """
 
+import glob
 import json
 import os
 import sqlite3
+import sys
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+
+try:
+    from cryptography.fernet import Fernet
+except ImportError:
+    _venv_site_packages = glob.glob(
+        str(
+            Path(__file__).resolve().parent
+            / ".venv"
+            / "lib"
+            / "python3.*"
+            / "site-packages"
+        )
+    )
+    if not _venv_site_packages:
+        raise
+    sys.path.insert(0, _venv_site_packages[0])
+    from cryptography.fernet import Fernet
 
 # IDEA_BANK_DB_PATH overrides the default location -- used by the test
 # suite (subprocess-invoked CLI tests) to point at an isolated DB file
@@ -79,6 +103,83 @@ def now_str() -> str:
     return datetime.now().isoformat(sep=" ", timespec="seconds")
 
 
+# ---- privacy: encryption at rest ----
+#
+# Every free-text column (idea text/notes/fields, goal text, and the raw
+# lines migrate.py logs) is encrypted before it's ever written to
+# data/ideas.db, so the .db file itself is opaque -- a dev with the source
+# code and the database but not this key can't read a single idea. The key
+# lives outside the repo, at KEY_PATH (mode 0600, generated on first use),
+# so it's never committed and never travels with the database file.
+#
+# Columns that drive SQL (status, dates, ids) stay plaintext -- they're not
+# personal content and encrypting them would break WHERE/ORDER BY/CHECK.
+
+KEY_PATH = Path(
+    os.environ.get("IDEA_BANK_KEY_PATH")
+    or (Path.home() / ".config" / "idea-bank" / "secret.key")
+)
+
+ENC_PREFIX = "enc1:"
+
+
+def _fernet() -> Fernet:
+    KEY_PATH.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not KEY_PATH.exists():
+        try:
+            fd = os.open(KEY_PATH, os.O_CREAT | os.O_WRONLY | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(Fernet.generate_key())
+        except FileExistsError:
+            pass  # lost a race with another process creating it first
+    return Fernet(KEY_PATH.read_bytes())
+
+
+def encrypt_str(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return ENC_PREFIX + _fernet().encrypt(value.encode()).decode()
+
+
+def decrypt_str(value: str | None) -> str | None:
+    """Passes a value through unchanged if it has no ENC_PREFIX -- covers
+    both a row `_ensure_encrypted_content` hasn't reached yet and plaintext
+    written straight to the table (bypassing encrypt_str) rather than
+    failing to decrypt."""
+    if value is None or not value.startswith(ENC_PREFIX):
+        return value
+    return _fernet().decrypt(value[len(ENC_PREFIX) :].encode()).decode()
+
+
+def _encrypt_unmigrated_rows(
+    conn: sqlite3.Connection, table: str, columns: list[str]
+) -> None:
+    """Encrypt `columns` in every row of `table` that's still plaintext,
+    judged by the first column having no ENC_PREFIX. One row at a time
+    (not a bulk UPDATE) because each value needs its own Fernet token."""
+    select_cols = ", ".join(["id", *columns])
+    set_clause = ", ".join(f"{column} = ?" for column in columns)
+    for row in conn.execute(f"SELECT {select_cols} FROM {table}"):
+        if (row[columns[0]] or "").startswith(ENC_PREFIX):
+            continue
+        values = [encrypt_str(row[column]) for column in columns]
+        conn.execute(
+            f"UPDATE {table} SET {set_clause} WHERE id = ?", [*values, row["id"]]
+        )
+
+
+def _ensure_encrypted_content(conn: sqlite3.Connection) -> None:
+    """One-time-per-row sweep that encrypts any legacy plaintext content
+    left over from before encryption existed. Idempotent: a row already
+    encrypted (ENC_PREFIX present) is skipped, so this is cheap after the
+    first run, same as the other migrations above."""
+    _encrypt_unmigrated_rows(conn, "ideas", ["text", "notes", "fields"])
+    _encrypt_unmigrated_rows(conn, "goals", ["text"])
+    _encrypt_unmigrated_rows(conn, "import_log", ["raw_line"])
+    _encrypt_unmigrated_rows(conn, "flagged_imports", ["raw_line", "reason"])
+    conn.commit()
+
+
 def _ensure_fields_column(conn: sqlite3.Connection) -> None:
     """Add the `fields` column to a pre-existing ideas table that predates it.
 
@@ -145,6 +246,7 @@ def get_conn() -> sqlite3.Connection:
     _ensure_fields_column(conn)
     _ensure_frontier_status(conn)
     _migrate_from_v1_daily_goals(conn)
+    _ensure_encrypted_content(conn)
     return conn
 
 
@@ -172,7 +274,10 @@ def encode_fields(fields: dict | None) -> str | None:
 
 def row_to_idea(row: sqlite3.Row) -> dict:
     idea = dict(row)
-    idea["fields"] = json.loads(idea["fields"]) if idea.get("fields") else {}
+    idea["text"] = decrypt_str(idea["text"])
+    idea["notes"] = decrypt_str(idea["notes"])
+    fields_raw = decrypt_str(idea["fields"])
+    idea["fields"] = json.loads(fields_raw) if fields_raw else {}
     return idea
 
 
@@ -187,7 +292,7 @@ def add_idea(
         cur = conn.execute(
             "INSERT INTO ideas (text, status, created_at, updated_at, fields) "
             "VALUES (?, ?, ?, ?, ?)",
-            (text, status, ts, ts, encode_fields(fields)),
+            (encrypt_str(text), status, ts, ts, encrypt_str(encode_fields(fields))),
         )
         conn.commit()
         return cur.lastrowid
@@ -198,6 +303,36 @@ def get_idea(conn: sqlite3.Connection, idea_id: int) -> dict | None:
         f"SELECT {IDEA_COLUMNS} FROM ideas WHERE id = ?", (idea_id,)
     ).fetchone()
     return row_to_idea(row) if row else None
+
+
+def update_idea(conn: sqlite3.Connection, idea_id: int, updates: dict) -> dict | None:
+    """Update whichever of status/text/notes/fields is a key in `updates`,
+    leaving the rest untouched (so `updates={"notes": None}` clears notes,
+    while omitting the "notes" key leaves it alone). Centralizing every idea
+    write here -- instead of ad-hoc UPDATE statements in server.py/cli/idea
+    -- is what guarantees text/notes/fields are always encrypted before they
+    hit the database."""
+    if get_idea(conn, idea_id) is None:
+        return None
+
+    set_clauses, values = ["updated_at = ?"], [now_str()]
+    if "status" in updates:
+        set_clauses.append("status = ?")
+        values.append(updates["status"])
+    if "text" in updates:
+        set_clauses.append("text = ?")
+        values.append(encrypt_str(updates["text"]))
+    if "notes" in updates:
+        set_clauses.append("notes = ?")
+        values.append(encrypt_str(updates["notes"]))
+    if "fields" in updates:
+        set_clauses.append("fields = ?")
+        values.append(encrypt_str(encode_fields(updates["fields"])))
+
+    values.append(idea_id)
+    conn.execute(f"UPDATE ideas SET {', '.join(set_clauses)} WHERE id = ?", values)
+    conn.commit()
+    return get_idea(conn, idea_id)
 
 
 # ---- goals ----
@@ -238,15 +373,21 @@ def create_goal(
     cur = conn.execute(
         "INSERT INTO goals (text, idea_id, recurring, target_date, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
-        (text, idea_id, 1 if recurring else 0, target_date, now_str()),
+        (encrypt_str(text), idea_id, 1 if recurring else 0, target_date, now_str()),
     )
     conn.commit()
     return get_goal(conn, cur.lastrowid)
 
 
+def row_to_goal(row: sqlite3.Row) -> dict:
+    goal = dict(row)
+    goal["text"] = decrypt_str(goal["text"])
+    return goal
+
+
 def get_goal(conn: sqlite3.Connection, goal_id: int) -> dict | None:
     row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
-    return dict(row) if row else None
+    return row_to_goal(row) if row else None
 
 
 def missing_goal_ids(conn: sqlite3.Connection, goal_ids: list[int]) -> list[int]:
@@ -302,7 +443,7 @@ def goals_due_on(conn: sqlite3.Connection, date: str) -> list[dict]:
         "ORDER BY g.created_at",
         (date, date, date, date),
     ).fetchall()
-    return [dict(row) for row in rows]
+    return [row_to_goal(row) for row in rows]
 
 
 def set_goal_done(

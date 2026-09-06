@@ -21,8 +21,8 @@ installs the new systemd user units (`idea-bank-v2-*`, separate names from the
 old `idea-triage`/`idea-horizon-review` units, which are left alone), and starts
 the server as a persistent user service.
 
-Open **http://127.0.0.1:8420/** — or just run `idea-bank-v2-triage.timer` once,
-which opens it for you.
+Open **http://127.0.0.1:8420/** — or click **idea bank** in your application
+menu, which `install.sh` also adds (see **Desktop app** below).
 
 To run the server by hand instead of via systemd:
 
@@ -204,6 +204,17 @@ ground as the CLI, keyboard-first:
   several at once, use `v` + `j`/`k` + a status key instead.
 - Clicking a card selects it (mouse fallback); Shift+click extends a range
   the same way `v` + `j`/`k` does. Clicking is never required.
+- **Theme**: the `theme: dark` / `theme: light` / `theme: system` button in
+  the top bar cycles between the original dark palette, a light palette
+  (same accent hues, re-tuned for contrast), and "system" (follows your OS's
+  light/dark setting). Persisted in your browser's `localStorage`, so it's
+  per-browser, not stored in the database.
+- **Pop out an idea**: the detail modal's "pop out" button opens the same
+  idea in a separate browser window (`static/idea.html`) — the full editor
+  (text, status, fields, notes), not squeezed into the board's modal, useful
+  for keeping one idea open full-size alongside the board. Saving ("done")
+  or deleting it closes that window and the change shows up on the board the
+  next time it re-fetches.
 
 **Expiry** — `scripts/expire.py` is the server-side replacement for the old
 `expire.sh`. It finds every idea with `status='queued'` whose `updated_at` is
@@ -215,6 +226,50 @@ browser via `xdg-open`.
 **Quarterly review** — `idea-bank-v2-horizon-review.timer` fires quarterly and
 opens `http://127.0.0.1:8420/#horizon`, which scrolls the Horizon column into
 view; if `xdg-open` isn't available it falls back to `notify-send`.
+
+## Desktop app
+
+`install.sh` adds an **idea bank** entry to your application menu
+(`~/.local/share/applications/idea-bank.desktop`), so it's clickable like any
+other installed app rather than something you have to remember a URL for.
+Clicking it runs `desktop/launch.sh`, which starts the local server if it
+isn't already running, then opens the board in a chrome-less browser window
+(`brave`/`chromium`/`google-chrome` `--app=`, whichever is installed -- no
+address bar or tabs, so it reads as a real app window, not a browser tab).
+Falls back to `xdg-open` (a normal tab) if no Chromium-family browser is
+found. This is still the same Flask server and the same browser engine
+underneath -- no separate native-app runtime or extra dependency.
+
+## Privacy: encryption at rest
+
+Every piece of free-text content — idea text/notes/structured fields, goal
+text, and the raw lines `migrate.py` logs — is encrypted (via the
+`cryptography` package's Fernet, AES-128-CBC + HMAC) before it's ever written
+to `data/ideas.db`. Status, timestamps, and ids stay plaintext (they drive
+`WHERE`/`ORDER BY`/the status `CHECK` constraint, and aren't personal
+content), but the database file itself has no readable idea or goal text in
+it — opening it directly (`sqlite3 data/ideas.db`, a text editor, a backup
+tool) shows only ciphertext blobs prefixed `enc1:`.
+
+The encryption key lives outside the repository, at
+`~/.config/idea-bank/secret.key` (mode `0600`, generated automatically on
+first use) — never committed, never copied alongside the database. Losing
+that file means losing access to everything already encrypted with it, same
+as losing the key to any encrypted volume; there's no recovery path, by
+design (the whole point is that nothing but that key can decrypt the data).
+
+**Threat model**: this protects against someone reading `data/ideas.db` (or
+a copy of it, e.g. from a backup, a git accident, or a shared machine)
+without also having the key file. It does **not** protect against someone
+with full access to your running, unlocked machine — the key file is
+readable by your own user account, and the app itself decrypts everything
+it displays, same as any local disk encryption doesn't help once you're
+already logged in.
+
+A database created before this feature existed is migrated automatically
+and transparently: the first connection after upgrading re-writes every
+legacy plaintext row as ciphertext in place (`dbutil._ensure_encrypted_content`,
+idempotent — already-encrypted rows are skipped).
 
 ## Migration
 
@@ -327,6 +382,21 @@ you're ready to touch that file.
   shell-history/path markers) rather than hardcoded to the two known bad
   lines, so the script stays useful if `inbox.md` grows more such lines
   before you retire the old system.
+- **Desktop app = a chrome-less browser window, not a separate native
+  runtime.** A dedicated GUI toolkit (e.g. pywebview) would need a system
+  package (webkit2gtk) beyond what's already installed; a `.desktop` entry
+  plus `--app=` on the browser you already have gives the same "click an
+  icon, get an app window" result with no new dependency.
+- **Only dark/light/system, no arbitrary theme picker.** Extra accent color
+  swatches were considered and left out — the app has a specific, deliberate
+  palette (mono wordmark, muted gold/teal/red status colors), and a color
+  picker would mostly just invite a mismatched combination without adding
+  real usefulness.
+- **Encryption covers free text, not status/dates/ids.** Those columns
+  drive SQL directly (`WHERE status = ...`, `ORDER BY updated_at`, the
+  status `CHECK` constraint) and aren't personal content on their own, so
+  encrypting them would cost real functionality (filtering, sorting, the
+  constraint itself) for no privacy benefit.
 
 ## Project layout
 
@@ -337,12 +407,17 @@ name):
 ```
 idea_bank/
   server.py            Flask app: JSON API + serves static/
-  dbutil.py            shared SQLite schema/connection helper
+  dbutil.py            shared SQLite schema/connection helper + encryption
   static/
-    index.html
+    index.html          board GUI
+    idea.html           standalone pop-out idea editor
     style.css
-    app.js
+    app.js               board GUI logic (+ theme toggle)
+    idea-window.js       pop-out editor logic
   cli/idea              standalone capture script
+  desktop/
+    launch.sh            opens the board in a chrome-less browser window
+    idea-bank.desktop.template   app-menu entry (installed by install.sh)
   scripts/
     expire.py            8-week queued -> archive sweep
     migrate.py            one-time/re-runnable import from ~/ideas/inbox.md
@@ -353,4 +428,7 @@ idea_bank/
   install.sh
   requirements.txt
   data/                 ideas.db, expire.log (created at runtime)
+
+~/.config/idea-bank/secret.key   encryption key (outside the repo, mode 0600)
+~/.local/share/applications/idea-bank.desktop   installed app-menu entry
 ```

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>idea</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="standalone-idea">
+
+<div class="modal" role="dialog" aria-label="idea detail">
+  <div class="modal-header">
+    <div class="modal-status-pills" id="modal-status-pills"></div>
+    <button type="button" class="modal-close" id="modal-close" title="close window" aria-label="close">×</button>
+  </div>
+
+  <textarea class="modal-text" id="modal-text" rows="4"></textarea>
+
+  <div class="modal-section">
+    <div class="modal-section-label">fields</div>
+    <div class="modal-fields" id="modal-fields"></div>
+    <button type="button" class="modal-add-field" id="modal-add-field">+ add field</button>
+  </div>
+
+  <div class="modal-section">
+    <div class="modal-section-label">notes</div>
+    <textarea class="modal-notes" id="modal-notes" rows="4" placeholder="freeform notes..."></textarea>
+  </div>
+
+  <div class="modal-meta" id="modal-meta"></div>
+
+  <div class="modal-footer">
+    <button type="button" class="modal-delete" id="modal-delete">delete</button>
+    <button type="button" class="modal-done" id="modal-done">done</button>
+  </div>
+</div>
+
+<script src="idea-window.js"></script>
+</body>
+</html>

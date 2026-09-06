@@ -55,22 +55,22 @@ def record_imported(conn, raw_line: str, text: str, timestamp: str) -> None:
     created_at = f"{timestamp}:00"
     conn.execute(
         "INSERT INTO ideas (text, status, created_at, updated_at) VALUES (?, 'inbox', ?, ?)",
-        (text, created_at, created_at),
+        (dbutil.encrypt_str(text), created_at, created_at),
     )
     conn.execute(
         "INSERT INTO import_log (raw_line, action, processed_at) VALUES (?, 'imported', ?)",
-        (raw_line, dbutil.now_str()),
+        (dbutil.encrypt_str(raw_line), dbutil.now_str()),
     )
 
 
 def record_flagged(conn, raw_line: str, reason: str) -> None:
     conn.execute(
         "INSERT INTO flagged_imports (raw_line, reason, flagged_at) VALUES (?, ?, ?)",
-        (raw_line, reason, dbutil.now_str()),
+        (dbutil.encrypt_str(raw_line), dbutil.encrypt_str(reason), dbutil.now_str()),
     )
     conn.execute(
         "INSERT INTO import_log (raw_line, action, processed_at) VALUES (?, 'flagged', ?)",
-        (raw_line, dbutil.now_str()),
+        (dbutil.encrypt_str(raw_line), dbutil.now_str()),
     )
 
 
@@ -103,7 +103,9 @@ def print_summary(counts: dict, conn) -> None:
             "SELECT raw_line, reason FROM flagged_imports ORDER BY id"
         ).fetchall()
         for row in rows:
-            print(f"  - {row['raw_line']!r}\n    reason: {row['reason']}")
+            raw_line = dbutil.decrypt_str(row["raw_line"])
+            reason = dbutil.decrypt_str(row["reason"])
+            print(f"  - {raw_line!r}\n    reason: {reason}")
 
     print(f"\n~/ideas/inbox.md was only read, never modified: {OLD_INBOX}")
 
@@ -118,7 +120,8 @@ def main():
 
     with dbutil.connection() as conn:
         already_processed = {
-            row["raw_line"] for row in conn.execute("SELECT raw_line FROM import_log")
+            dbutil.decrypt_str(row["raw_line"])
+            for row in conn.execute("SELECT raw_line FROM import_log")
         }
 
         for raw_line in raw_lines:

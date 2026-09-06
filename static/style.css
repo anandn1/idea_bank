@@ -1,3 +1,12 @@
+/* ---- theme ----
+   Dark is the base palette (this app's original identity); [data-theme]
+   is set by app.js from a top-bar toggle (dark / light / system), cycled
+   and persisted in localStorage. "system" leaves the attribute off
+   entirely and falls back to prefers-color-scheme below, so a light
+   override only applies when it's actually chosen. Accent hues (gold/
+   teal/red) keep the same identity in both palettes, just re-tuned for
+   contrast against a light ground instead of a dark one. */
+
 :root {
   --bg: #14171c;
   --panel: #1c2028;
@@ -8,9 +17,50 @@
   --gold: #c9a15b;
   --teal: #5c8b85;
   --red: #b0645a;
+  --surface-selected: #262b35;
+  --surface-hover: #20242c;
+  --gold-glow: rgba(201, 161, 91, 0.06);
+  --gold-border-soft: rgba(201, 161, 91, 0.4);
+  --teal-border-soft: rgba(92, 139, 133, 0.55);
 
   --sans: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+:root[data-theme="light"] {
+  --bg: #f1ece3;
+  --panel: #e8e1d3;
+  --text: #2a251e;
+  --text-dim: #7a7266;
+  --border: rgba(42, 37, 30, 0.1);
+  --border-strong: rgba(42, 37, 30, 0.22);
+  --gold: #93672a;
+  --teal: #3c645f;
+  --red: #8a4238;
+  --surface-selected: #ded4bf;
+  --surface-hover: #e4dac6;
+  --gold-glow: rgba(147, 103, 42, 0.08);
+  --gold-border-soft: rgba(147, 103, 42, 0.45);
+  --teal-border-soft: rgba(60, 100, 95, 0.55);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --bg: #f1ece3;
+    --panel: #e8e1d3;
+    --text: #2a251e;
+    --text-dim: #7a7266;
+    --border: rgba(42, 37, 30, 0.1);
+    --border-strong: rgba(42, 37, 30, 0.22);
+    --gold: #93672a;
+    --teal: #3c645f;
+    --red: #8a4238;
+    --surface-selected: #ded4bf;
+    --surface-hover: #e4dac6;
+    --gold-glow: rgba(147, 103, 42, 0.08);
+    --gold-border-soft: rgba(147, 103, 42, 0.45);
+    --teal-border-soft: rgba(60, 100, 95, 0.55);
+  }
 }
 
 * {
@@ -104,7 +154,7 @@ body {
 
 .target-pill.selected {
   color: var(--text);
-  background: #262b35;
+  background: var(--surface-selected);
 }
 
 .target-pill[data-status="active"].selected { color: var(--gold); border-color: var(--gold); }
@@ -113,9 +163,11 @@ body {
 .target-pill[data-status="frontier"].selected { color: var(--teal); border-color: var(--teal); }
 .target-pill[data-status="archive"].selected { color: var(--red); border-color: var(--red); }
 
-/* ---- goals toggle: compact button in the top bar, opens the side panel ---- */
+/* ---- goals toggle: compact button in the top bar, opens the side panel.
+   theme-toggle shares its look -- both are plain mono status buttons. ---- */
 
-.goals-toggle {
+.goals-toggle,
+.theme-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -131,7 +183,8 @@ body {
   white-space: nowrap;
 }
 
-.goals-toggle:hover {
+.goals-toggle:hover,
+.theme-toggle:hover {
   color: var(--text);
   border-color: var(--text-dim);
 }
@@ -246,17 +299,17 @@ body {
 .card[data-status="active"] { border-left-color: var(--gold); }
 .card[data-status="queued"] { border-left-color: var(--teal); }
 .card[data-status="horizon"] { border-left-color: var(--teal); }
-.card[data-status="frontier"] { border-left-color: rgba(92, 139, 133, 0.55); }
+.card[data-status="frontier"] { border-left-color: var(--teal-border-soft); }
 .card[data-status="archive"] { border-left-color: var(--red); }
 
 .card.selected {
   border-color: var(--gold);
-  background: #22262f;
+  background: var(--surface-selected);
 }
 
 .card.in-range {
   border-color: var(--border-strong);
-  background: #20242c;
+  background: var(--surface-hover);
 }
 
 .card[draggable="true"] {
@@ -268,7 +321,7 @@ body {
 }
 
 .cards.drag-over {
-  background: rgba(201, 161, 91, 0.06);
+  background: var(--gold-glow);
   outline: 1px dashed var(--border-strong);
   outline-offset: -4px;
 }
@@ -334,7 +387,7 @@ body {
 .card[data-status="active"] .card-status-tag { color: var(--gold); border-color: var(--gold); }
 .card[data-status="queued"] .card-status-tag { color: var(--teal); border-color: var(--teal); }
 .card[data-status="horizon"] .card-status-tag { color: var(--teal); border-color: var(--teal); }
-.card[data-status="frontier"] .card-status-tag { color: var(--teal); border-color: rgba(92, 139, 133, 0.55); }
+.card[data-status="frontier"] .card-status-tag { color: var(--teal); border-color: var(--teal-border-soft); }
 .card[data-status="archive"] .card-status-tag { color: var(--red); border-color: var(--red); }
 
 .empty-hint {
@@ -491,7 +544,7 @@ body {
 }
 
 .goal-row.done {
-  border-color: rgba(201, 161, 91, 0.4);
+  border-color: var(--gold-border-soft);
 }
 
 .goal-check {
@@ -738,6 +791,27 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+}
+
+.modal-footer-left {
+  display: flex;
+  gap: 8px;
+}
+
+.modal-popout {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 6px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.modal-popout:hover {
+  color: var(--text);
+  border-color: var(--text-dim);
 }
 
 .modal-delete {
@@ -758,4 +832,23 @@ body {
   padding: 6px 14px;
   border-radius: 3px;
   cursor: pointer;
+}
+
+/* ---- standalone idea window (idea.html): the modal's own markup, popped
+   out into a real window instead of an in-board overlay -- so it's just
+   the .modal box centered on a page with no backdrop to dim. ---- */
+
+body.standalone-idea {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+body.standalone-idea .modal {
+  width: 100%;
+}
+
+.standalone-notice {
+  font-size: 13px;
+  color: var(--text-dim);
 }

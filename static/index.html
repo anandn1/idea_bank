@@ -29,6 +29,9 @@
     <span>goals</span>
     <span class="goals-badge" id="goals-badge">0/0</span>
   </button>
+  <button type="button" class="theme-toggle" id="theme-toggle" aria-label="cycle color theme" title="cycle theme (dark / light / system)">
+    <span id="theme-toggle-label">theme: dark</span>
+  </button>
   <div class="mode-indicator" id="mode-indicator" hidden></div>
   <div class="help">
     <span><b>j/k</b> move</span>
@@ -116,7 +119,10 @@
     <div class="modal-meta" id="modal-meta"></div>
 
     <div class="modal-footer">
-      <button type="button" class="modal-delete" id="modal-delete">delete</button>
+      <div class="modal-footer-left">
+        <button type="button" class="modal-delete" id="modal-delete">delete</button>
+        <button type="button" class="modal-popout" id="modal-popout">pop out</button>
+      </div>
       <button type="button" class="modal-done" id="modal-done">done</button>
     </div>
   </div>

@@ -109,15 +109,16 @@ def test_ensure_fields_column_migrates_pre_existing_table(db_path):
             notes TEXT
         )
         """)
-    raw.execute(
+    cur = raw.execute(
         "INSERT INTO ideas (text, status, created_at, updated_at) VALUES ('old row', 'inbox', 'x', 'x')"
     )
+    old_row_id = cur.lastrowid
     raw.commit()
     raw.close()
 
-    conn = dbutil.get_conn()  # runs the migration check
+    conn = dbutil.get_conn()  # runs the migration check (and encrypts 'old row')
     columns = {row["name"] for row in conn.execute("PRAGMA table_info(ideas)")}
-    row = conn.execute("SELECT * FROM ideas WHERE text = 'old row'").fetchone()
+    row = conn.execute("SELECT * FROM ideas WHERE id = ?", (old_row_id,)).fetchone()
     conn.close()
 
     assert "fields" in columns
@@ -129,6 +130,81 @@ def test_ensure_fields_column_is_idempotent(db_path):
     dbutil.get_conn().close()
     dbutil.get_conn().close()
     dbutil.get_conn().close()
+
+
+# ---- privacy: encryption at rest ----
+
+
+def test_encrypt_str_round_trips(db_path):
+    assert dbutil.decrypt_str(dbutil.encrypt_str("a secret idea")) == "a secret idea"
+
+
+def test_encrypt_str_passes_none_through(db_path):
+    assert dbutil.encrypt_str(None) is None
+    assert dbutil.decrypt_str(None) is None
+
+
+def test_decrypt_str_passes_plaintext_through_unchanged(db_path):
+    """A value with no ENC_PREFIX (not yet migrated, or written directly by
+    test setup code) is returned as-is rather than raising."""
+    assert dbutil.decrypt_str("plain, un-prefixed text") == "plain, un-prefixed text"
+
+
+def test_add_idea_stores_ciphertext_not_plaintext(db_path):
+    idea_id = dbutil.add_idea("a very private idea", fields={"secret": "yes"})
+    raw = sqlite3.connect(db_path)
+    row = raw.execute(
+        "SELECT text, fields FROM ideas WHERE id = ?", (idea_id,)
+    ).fetchone()
+    raw.close()
+
+    assert "a very private idea" not in row[0]
+    assert row[0].startswith(dbutil.ENC_PREFIX)
+    assert "secret" not in row[1]
+
+
+def test_create_goal_stores_ciphertext_not_plaintext(conn):
+    goal = dbutil.create_goal(conn, "a private habit")
+    row = conn.execute("SELECT text FROM goals WHERE id = ?", (goal["id"],)).fetchone()
+
+    assert "a private habit" not in row["text"]
+    assert row["text"].startswith(dbutil.ENC_PREFIX)
+
+
+def test_ensure_encrypted_content_migrates_legacy_plaintext_rows(db_path):
+    raw = sqlite3.connect(db_path)
+    raw.execute(
+        "CREATE TABLE ideas (id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, "
+        "status TEXT NOT NULL DEFAULT 'inbox', created_at TEXT NOT NULL, "
+        "updated_at TEXT NOT NULL, notes TEXT, fields TEXT)"
+    )
+    cur = raw.execute(
+        "INSERT INTO ideas (text, created_at, updated_at) VALUES ('legacy idea', 'x', 'x')"
+    )
+    legacy_id = cur.lastrowid
+    raw.commit()
+    raw.close()
+
+    conn = dbutil.get_conn()  # runs _ensure_encrypted_content
+    idea = dbutil.get_idea(conn, legacy_id)
+    raw_row = conn.execute(
+        "SELECT text FROM ideas WHERE id = ?", (legacy_id,)
+    ).fetchone()
+    conn.close()
+
+    assert idea["text"] == "legacy idea"  # still reads back correctly
+    assert raw_row["text"].startswith(dbutil.ENC_PREFIX)  # but is now encrypted at rest
+
+
+def test_ensure_encrypted_content_is_idempotent(db_path):
+    dbutil.add_idea("x")
+    dbutil.get_conn().close()
+    dbutil.get_conn().close()  # must not double-encrypt an already-encrypted row
+
+    conn = dbutil.get_conn()
+    idea = dbutil.get_idea(conn, 1)
+    conn.close()
+    assert idea["text"] == "x"
 
 
 # ---- _ensure_frontier_status ----
@@ -148,14 +224,15 @@ def test_ensure_frontier_status_rebuilds_old_constraint_preserving_rows(db_path)
             fields TEXT
         )
         """)
-    raw.execute(
+    cur = raw.execute(
         "INSERT INTO ideas (text, status, created_at, updated_at) VALUES ('old row', 'horizon', 'x', 'x')"
     )
+    old_row_id = cur.lastrowid
     raw.commit()
     raw.close()
 
     conn = dbutil.get_conn()  # runs both migrations
-    row = conn.execute("SELECT * FROM ideas WHERE text = 'old row'").fetchone()
+    row = conn.execute("SELECT * FROM ideas WHERE id = ?", (old_row_id,)).fetchone()
     assert row["status"] == "horizon"
 
     # the new status is now actually accepted (would raise IntegrityError otherwise)

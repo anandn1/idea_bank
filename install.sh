@@ -42,9 +42,17 @@ echo "==> enabling the triage and horizon-review timers"
 systemctl --user enable --now idea-bank-v2-triage.timer
 systemctl --user enable --now idea-bank-v2-horizon-review.timer
 
+echo "==> installing the desktop launcher (Application menu entry)"
+chmod +x "$PROJECT_DIR/desktop/launch.sh"
+DESKTOP_APPS_DIR="$HOME/.local/share/applications"
+mkdir -p "$DESKTOP_APPS_DIR"
+sed "s|@PROJECT_DIR@|$PROJECT_DIR|g" "$PROJECT_DIR/desktop/idea-bank.desktop.template" \
+    > "$DESKTOP_APPS_DIR/idea-bank.desktop"
+update-desktop-database "$DESKTOP_APPS_DIR" 2>/dev/null || true
+
 echo ""
 echo "==> done."
-echo "    GUI:        http://127.0.0.1:8420/"
+echo "    GUI:        http://127.0.0.1:8420/  (or click 'idea bank' in your app menu)"
 echo "    Capture:    idea \"some text\""
 echo "    Migrate:    $VENV_DIR/bin/python $PROJECT_DIR/scripts/migrate.py"
 echo ""

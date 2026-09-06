@@ -18,9 +18,11 @@ CLI_PATH = PROJECT_ROOT / "cli" / "idea"
 
 @pytest.fixture
 def db_path(tmp_path, monkeypatch):
-    """Point dbutil at a fresh, isolated SQLite file for one test."""
+    """Point dbutil at a fresh, isolated SQLite file (and encryption key)
+    for one test -- never the real database or the real ~/.config secret."""
     path = tmp_path / "test_ideas.db"
     monkeypatch.setattr(dbutil, "DB_PATH", path)
+    monkeypatch.setattr(dbutil, "KEY_PATH", tmp_path / "test_secret.key")
     return path
 
 
@@ -39,9 +41,14 @@ def run_cli(tmp_path):
     exercise the exact contract a human or an agent would see.
     """
     cli_db_path = tmp_path / "cli_test.db"
+    cli_key_path = tmp_path / "cli_test_secret.key"
 
     def _run(*args, input=None):
-        env = {**os.environ, "IDEA_BANK_DB_PATH": str(cli_db_path)}
+        env = {
+            **os.environ,
+            "IDEA_BANK_DB_PATH": str(cli_db_path),
+            "IDEA_BANK_KEY_PATH": str(cli_key_path),
+        }
         return subprocess.run(
             [sys.executable, str(CLI_PATH), *args],
             capture_output=True,
