@@ -418,6 +418,8 @@ idea_bank/
   desktop/
     launch.sh            opens the board in a chrome-less browser window
     idea-bank.desktop.template   app-menu entry (installed by install.sh)
+    icon.png              app-menu icon (regenerate with make_icon.py)
+    make_icon.py           (re)generates icon.png -- run by hand, not by install.sh
   scripts/
     expire.py            8-week queued -> archive sweep
     migrate.py            one-time/re-runnable import from ~/ideas/inbox.md
