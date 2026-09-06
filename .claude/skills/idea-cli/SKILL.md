@@ -62,15 +62,21 @@ priority, owner, whatever) — entirely optional, no fixed schema.
 ## Goals: separate from ideas, self-reported
 
 A goal is its own thing — its own text (e.g. "walk 10000 steps"), not a
-tagged idea — and *optionally* links to one. It's either **recurring** (due
-every day until stopped, i.e. a habit) or **one-off** (due on a single
-date, default today). Completion is always **self-reported**: a goal never
-auto-completes because a linked idea changed status, since most goals (a
-step count, say) have no idea behind them at all.
+tagged idea — and *optionally* links to one. Ideas are long-term
+objectives; goals are the milestones you reach toward one. It's either
+**recurring** (due on whichever day(s) of the week you give it, via
+`--weekdays` -- "daily" is all seven, a single day is a weekly check-in,
+any other subset like `mon,wed,fri` is a milestone schedule) or **one-off**
+(due on a single date, given with `--date` -- any date at all, not just
+today; defaults to today if omitted). Completion is always
+**self-reported**: a goal never auto-completes because a linked idea
+changed status, since most goals (a step count, say) have no idea behind
+them at all.
 
 ```
-idea goal add "walk 10000 steps" --recurring     # a daily habit
-idea goal add "draft the proposal" --idea 12     # one-off, linked to idea #12
+idea goal add "walk 10000 steps" --weekdays daily      # every day
+idea goal add "gym" --weekdays mon,wed,fri              # specific weekdays
+idea goal add "draft the proposal" --idea 12 --date 2026-10-01   # one-off, any date
 idea goal list --json                            # today's due goals + completion
 idea goal done 5                                  # mark goal #5 done for today
 idea goal undo 5                                  # unmark it
@@ -78,6 +84,9 @@ idea goal stop 5                                  # stop a recurring goal (keeps
 idea goal remove 5                                # delete a goal and its history
 idea goal streak --json                           # current streak, longest, lifetime xp
 ```
+
+`--weekdays` also accepts `weekdays` (Mon-Fri) and `weekends` (Sat-Sun) as
+shorthands. `--weekdays` and `--date` are mutually exclusive on one goal.
 
 Streak math: an unfinished *today* doesn't break the streak (it's just not
 counted yet), and a day with nothing due at all is skipped rather than

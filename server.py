@@ -115,17 +115,34 @@ def create_goal():
     idea_id = payload.get("idea_id")
     if idea_id is not None and not isinstance(idea_id, int):
         return jsonify({"error": "idea_id must be an integer"}), 400
-    recurring = bool(payload.get("recurring"))
+
+    weekdays = payload.get("weekdays")
+    if weekdays is not None and (
+        not isinstance(weekdays, list)
+        or not all(
+            isinstance(d, int) and not isinstance(d, bool) and 0 <= d <= 6
+            for d in weekdays
+        )
+    ):
+        return (
+            jsonify(
+                {"error": "weekdays must be a list of integers 0-6 (Mon=0..Sun=6)"}
+            ),
+            400,
+        )
     target_date = payload.get("target_date")
-    if recurring and target_date:
-        return jsonify({"error": "target_date doesn't apply to a recurring goal"}), 400
+    if weekdays and target_date:
+        return (
+            jsonify({"error": "target_date doesn't apply to a goal with weekdays"}),
+            400,
+        )
 
     with dbutil.connection() as conn:
         goal = dbutil.create_goal(
             conn,
             text,
             idea_id=idea_id,
-            recurring=recurring,
+            weekdays=weekdays,
             target_date=target_date,
         )
         if goal is None:
@@ -151,7 +168,10 @@ def update_goal(goal_id):
 def stop_goal_route(goal_id):
     with dbutil.connection() as conn:
         if not dbutil.stop_goal(conn, goal_id):
-            return jsonify({"error": "not a recurring goal, or already stopped"}), 400
+            return (
+                jsonify({"error": "no weekday schedule to stop, or already stopped"}),
+                400,
+            )
         return jsonify(dbutil.get_goal(conn, goal_id))
 
 

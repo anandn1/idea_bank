@@ -86,6 +86,52 @@ def parse_field_args(raw: list[str] | None) -> tuple[dict, None] | tuple[None, s
     return fields, None
 
 
+WEEKDAY_ABBREVIATIONS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+WEEKDAY_DISPLAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def parse_weekdays_arg(raw: str | None) -> tuple[list[int] | None, None] | tuple[None, str]:
+    """Parse --weekdays into the list[int] dbutil.create_goal expects
+    (Monday=0..Sunday=6). None (the flag was omitted) means "one-off", not
+    "no days" -- callers must not confuse the two. Returns (None, error) on
+    an unrecognized value."""
+    if raw is None:
+        return None, None
+    value = raw.strip().lower()
+    if value == "daily":
+        return list(range(7)), None
+    if value == "weekdays":
+        return list(range(5)), None
+    if value == "weekends":
+        return [5, 6], None
+    days = []
+    for token in value.split(","):
+        token = token.strip()
+        if token not in WEEKDAY_ABBREVIATIONS:
+            return None, (
+                f"invalid --weekdays value: {token!r} "
+                "(use daily/weekdays/weekends, or e.g. mon,wed,fri)"
+            )
+        days.append(WEEKDAY_ABBREVIATIONS[token])
+    return sorted(set(days)), None
+
+
+def format_weekdays(weekdays: list[int] | None) -> str:
+    """Human-readable schedule tag for a goal, e.g. `goal list`'s per-goal
+    line. Mirrors formatWeekdays in app.js -- necessarily duplicated, since
+    there's no code shared between the CLI (Python) and the GUI (JS)."""
+    if weekdays is None:
+        return "one-off"
+    days = set(weekdays)
+    if days == set(range(7)):
+        return "daily"
+    if days == set(range(5)):
+        return "weekdays"
+    if days == {5, 6}:
+        return "weekends"
+    return "/".join(WEEKDAY_DISPLAY[d] for d in sorted(days))
+
+
 def parse_ids_and_status(
     tokens: list[str], status_flag: str | None
 ) -> tuple[list[int], str] | tuple[None, str]:
@@ -179,9 +225,11 @@ def build_epilog() -> str:
         '  idea edit 12 --notes "waiting on legal sign-off"\n'
         "  idea edit 12 --unset-notes          clear notes\n"
         "\n"
-        "Goals (your own daily/one-off targets, optionally linked to an idea):\n"
-        "  idea goal add \"walk 10000 steps\" --recurring   a daily habit\n"
-        "  idea goal add \"draft the proposal\" --idea 12   a one-off step toward idea #12\n"
+        "Goals (milestones toward an idea, or standalone habits):\n"
+        "  idea goal add \"walk 10000 steps\" --weekdays daily       every day\n"
+        "  idea goal add \"gym\" --weekdays mon,wed,fri              specific weekdays\n"
+        "  idea goal add \"draft the proposal\" --idea 12 --date 2026-10-01\n"
+        "                                                            one-off, any date\n"
         "  idea goal list                                  show today's due goals\n"
         "  idea goal done 5                                mark goal #5 done for today\n"
         "  idea goal undo 5                                unmark it\n"
@@ -306,8 +354,10 @@ def build_parser() -> argparse.ArgumentParser:
     goal_add = goal_sub.add_parser(
         "add", help="create a new goal",
         description=(
-            "Create a goal. Recurring goals are due every day until stopped; "
-            "one-off goals are due on a single date (default: today)."
+            "Create a goal. A --weekdays goal recurs on whichever day(s) of the "
+            "week you give until stopped; otherwise it's one-off, due on a single "
+            "date (default: today, but any date is fine -- a goal is a milestone "
+            "toward an idea, not necessarily something due right away)."
         ),
     )
     goal_add.add_argument(
@@ -319,12 +369,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="optionally link this goal to an existing idea",
     )
     goal_add.add_argument(
-        "--recurring", action="store_true",
-        help="due every day (a habit) instead of a single date",
+        "--weekdays", metavar="daily|weekdays|weekends|mon,wed,fri",
+        help=(
+            "due on these day(s) of the week (a recurring habit or milestone "
+            "schedule) instead of a single date -- 'daily' (every day), "
+            "'weekdays' (Mon-Fri), 'weekends' (Sat-Sun), or a comma-separated "
+            "list of day abbreviations (mon,tue,wed,thu,fri,sat,sun)"
+        ),
     )
     goal_add.add_argument(
         "--date", metavar="YYYY-MM-DD",
-        help="one-off target date (default: today; not valid with --recurring)",
+        help="one-off target date, any date at all (default: today; not valid with --weekdays)",
     )
     add_json_flag(goal_add)
 
@@ -582,8 +637,11 @@ def emit_goals(args, goals: list[dict], human_verb: str) -> None:
 
 
 def cmd_goal_add(args) -> int:
-    if args.recurring and args.date:
-        return fail(args, "--date doesn't apply to --recurring goals (they're due every day)")
+    weekdays, err = parse_weekdays_arg(args.weekdays)
+    if err:
+        return fail(args, err)
+    if weekdays and args.date:
+        return fail(args, "--date doesn't apply to a --weekdays goal (it has its own recurring schedule)")
     text = " ".join(args.text).strip()
     if not text:
         return fail(args, "goal text cannot be empty")
@@ -592,7 +650,7 @@ def cmd_goal_add(args) -> int:
         if args.idea_id is not None and dbutil.get_idea(conn, args.idea_id) is None:
             return fail(args, f"no idea with id {args.idea_id}")
         goal = dbutil.create_goal(
-            conn, text, idea_id=args.idea_id, recurring=args.recurring, target_date=args.date,
+            conn, text, idea_id=args.idea_id, weekdays=weekdays, target_date=args.date,
         )
     emit_goal(args, goal, "created")
     return 0
@@ -632,7 +690,7 @@ def cmd_goal_stop(args) -> int:
         stopped = [goal_id for goal_id in args.ids if dbutil.stop_goal(conn, goal_id)]
 
     if not stopped:
-        return fail(args, "none of those goals are recurring (or they're already stopped)")
+        return fail(args, "none of those goals have a weekday schedule (or they're already stopped)")
     if args.json:
         print(json.dumps({"stopped": stopped}))
     else:
@@ -673,7 +731,7 @@ def cmd_goal_list(args) -> int:
     print(f"{date}: {done}/{len(goals)} goals complete")
     for g in goals:
         mark = "x" if g["completed_at"] else " "
-        tag = "daily" if g["recurring"] else "one-off"
+        tag = format_weekdays(g["weekdays"])
         idea_note = f"  (idea #{g['idea_id']})" if g["idea_id"] else ""
         print(f"  [{mark}] #{g['id']} ({tag}) {g['text']}{idea_note}")
     return 0

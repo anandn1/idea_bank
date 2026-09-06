@@ -25,18 +25,21 @@
     <button type="button" class="target-pill" data-status="frontier">frontier</button>
     <button type="button" class="target-pill" data-status="archive">archive</button>
   </div>
-  <button type="button" class="goals-toggle" id="goals-toggle" aria-label="open goals panel">
-    <span>goals</span>
-    <span class="goals-badge" id="goals-badge">0/0</span>
-  </button>
+  <div class="screen-tabs" id="screen-tabs" role="tablist">
+    <button type="button" class="screen-tab selected" id="tab-goals" data-screen="goals" role="tab" aria-selected="true">
+      goals <span class="goals-badge" id="goals-badge">0/0</span>
+    </button>
+    <button type="button" class="screen-tab" id="tab-board" data-screen="board" role="tab" aria-selected="false">ideas</button>
+  </div>
   <button type="button" class="theme-toggle" id="theme-toggle" aria-label="cycle color theme" title="cycle theme (dark / light / system)">
     <span id="theme-toggle-label">theme: dark</span>
   </button>
   <div class="mode-indicator" id="mode-indicator" hidden></div>
   <div class="help">
+    <span><b>g</b> goals</span>
+    <span><b>i</b> ideas</span>
     <span><b>j/k</b> move</span>
     <span><b>a/q/h/f/x</b> move idea</span>
-    <span><b>g</b> goals panel</span>
     <span><b>↵</b> open</span>
     <span><b>e</b> quick edit</span>
     <span><b>v</b> select range</span>
@@ -45,56 +48,70 @@
   </div>
 </header>
 
-<main class="board" id="board">
-  <section class="column" data-status="inbox">
-    <h2 class="column-title">Inbox</h2>
-    <div class="cards" id="cards-inbox"></div>
+<main class="screens">
+  <section class="screen goals-screen" id="goals-screen">
+    <div class="goals-screen-inner">
+      <div class="goals-stats">
+        <span id="goal-streak">streak 0d</span>
+        <span id="goal-longest">best 0d</span>
+        <span id="goal-xp">0xp</span>
+      </div>
+
+      <form class="goal-add-form" id="goal-add-form" autocomplete="off">
+        <input type="text" id="goal-add-text" placeholder="new goal, e.g. walk 10000 steps">
+        <div class="goal-add-weekdays" id="goal-add-weekdays" role="group" aria-label="recurs on">
+          <button type="button" class="target-pill goal-weekday-pill" data-weekday="6">Sun</button>
+          <button type="button" class="target-pill goal-weekday-pill" data-weekday="0">Mon</button>
+          <button type="button" class="target-pill goal-weekday-pill" data-weekday="1">Tue</button>
+          <button type="button" class="target-pill goal-weekday-pill" data-weekday="2">Wed</button>
+          <button type="button" class="target-pill goal-weekday-pill" data-weekday="3">Thu</button>
+          <button type="button" class="target-pill goal-weekday-pill" data-weekday="4">Fri</button>
+          <button type="button" class="target-pill goal-weekday-pill" data-weekday="5">Sat</button>
+        </div>
+        <div class="goal-add-row">
+          <input type="date" id="goal-add-date" class="goal-add-date">
+          <select id="goal-add-idea"><option value="">no linked idea</option></select>
+          <button type="submit" class="goal-add-submit">add</button>
+        </div>
+      </form>
+      <div class="goal-date-settings" id="goal-date-settings">
+        <label><input type="checkbox" id="goal-date-smart-default" checked> smart default date</label>
+        <label>suggest tomorrow after <input type="number" id="goal-date-cutoff-hour" min="0" max="23" value="18">:00</label>
+      </div>
+
+      <div class="goal-list" id="goal-list"></div>
+    </div>
   </section>
-  <section class="column" data-status="active">
-    <h2 class="column-title">Active</h2>
-    <div class="cards" id="cards-active"></div>
-  </section>
-  <section class="column" data-status="queued">
-    <h2 class="column-title">Queued</h2>
-    <div class="cards" id="cards-queued"></div>
-  </section>
-  <section class="column" data-status="horizon">
-    <h2 class="column-title">Horizon</h2>
-    <div class="cards" id="cards-horizon"></div>
-  </section>
-  <section class="column" data-status="frontier">
-    <h2 class="column-title">Frontier</h2>
-    <div class="cards" id="cards-frontier"></div>
-  </section>
-  <section class="column" data-status="archive">
-    <h2 class="column-title">Archive</h2>
-    <div class="cards" id="cards-archive"></div>
+
+  <section class="screen board-screen" id="board-screen" hidden>
+    <div class="board" id="board">
+      <section class="column" data-status="inbox">
+        <h2 class="column-title">Inbox</h2>
+        <div class="cards" id="cards-inbox"></div>
+      </section>
+      <section class="column" data-status="active">
+        <h2 class="column-title">Active</h2>
+        <div class="cards" id="cards-active"></div>
+      </section>
+      <section class="column" data-status="queued">
+        <h2 class="column-title">Queued</h2>
+        <div class="cards" id="cards-queued"></div>
+      </section>
+      <section class="column" data-status="horizon">
+        <h2 class="column-title">Horizon</h2>
+        <div class="cards" id="cards-horizon"></div>
+      </section>
+      <section class="column" data-status="frontier">
+        <h2 class="column-title">Frontier</h2>
+        <div class="cards" id="cards-frontier"></div>
+      </section>
+      <section class="column" data-status="archive">
+        <h2 class="column-title">Archive</h2>
+        <div class="cards" id="cards-archive"></div>
+      </section>
+    </div>
   </section>
 </main>
-
-<aside class="goals-panel" id="goals-panel" hidden aria-label="daily goals">
-  <div class="goals-panel-header">
-    <h2>Goals</h2>
-    <button type="button" class="goals-panel-close" id="goals-panel-close" aria-label="close">×</button>
-  </div>
-
-  <div class="goals-stats">
-    <span id="goal-streak">streak 0d</span>
-    <span id="goal-longest">best 0d</span>
-    <span id="goal-xp">0xp</span>
-  </div>
-
-  <form class="goal-add-form" id="goal-add-form" autocomplete="off">
-    <input type="text" id="goal-add-text" placeholder="new goal, e.g. walk 10000 steps">
-    <div class="goal-add-row">
-      <label class="goal-add-recurring"><input type="checkbox" id="goal-add-recurring"> daily</label>
-      <select id="goal-add-idea"><option value="">no linked idea</option></select>
-      <button type="submit" class="goal-add-submit">add</button>
-    </div>
-  </form>
-
-  <div class="goal-list" id="goal-list"></div>
-</aside>
 
 <div class="modal-backdrop" id="modal-backdrop" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-label="idea detail">

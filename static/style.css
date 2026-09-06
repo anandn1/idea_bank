@@ -163,10 +163,16 @@ body {
 .target-pill[data-status="frontier"].selected { color: var(--teal); border-color: var(--teal); }
 .target-pill[data-status="archive"].selected { color: var(--red); border-color: var(--red); }
 
-/* ---- goals toggle: compact button in the top bar, opens the side panel.
-   theme-toggle shares its look -- both are plain mono status buttons. ---- */
+/* ---- screen tabs: switch between the goals screen and the board screen.
+   theme-toggle shares the same plain mono status-button look. ---- */
 
-.goals-toggle,
+.screen-tabs {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.screen-tab,
 .theme-toggle {
   display: flex;
   align-items: center;
@@ -183,10 +189,15 @@ body {
   white-space: nowrap;
 }
 
-.goals-toggle:hover,
+.screen-tab:hover,
 .theme-toggle:hover {
   color: var(--text);
   border-color: var(--text-dim);
+}
+
+.screen-tab.selected {
+  color: var(--gold);
+  border-color: var(--gold);
 }
 
 .goals-badge {
@@ -234,6 +245,27 @@ body {
   padding: 1px 5px;
   margin-right: 4px;
   font-weight: 500;
+}
+
+/* ---- screens: goals and board are full-screen sibling sections, switched
+   by the top-bar tabs (or g/i) -- goals is the default on load. ---- */
+
+.screens {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.screen[hidden] {
+  display: none;
 }
 
 /* ---- board ---- */
@@ -402,57 +434,24 @@ body {
    checks prefers-reduced-motion itself and skips the animation there,
    so no motion-related rule is needed in this stylesheet. */
 
-/* ---- goals panel: dedicated side drawer, toggled by the top-bar button
-   or 'g'. Docked alongside the board (no backdrop) so board shortcuts and
-   drag-and-drop keep working while it's open; opens/closes instantly, no
-   transition -- the FLIP card slide stays the only deliberate motion. ---- */
+/* ---- goals screen: the default landing screen, full-width instead of a
+   cramped side drawer -- reached via the top-bar tab (or 'g'), switching
+   is instant, no transition, same as the rest of this app's restrained
+   motion budget (the FLIP card slide is still the only deliberate one). ---- */
 
-.goals-panel {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 320px;
-  max-width: 90vw;
-  background: var(--panel);
-  border-left: 1px solid var(--border-strong);
-  padding: 16px;
+.goals-screen {
   overflow-y: auto;
-  z-index: 50;
+  align-items: center;
+  padding: 24px 20px;
+}
+
+.goals-screen-inner {
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.goals-panel[hidden] {
-  display: none;
-}
-
-.goals-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.goals-panel-header h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.goals-panel-close {
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  padding: 2px 6px;
-}
-
-.goals-panel-close:hover {
-  color: var(--text);
 }
 
 .goals-stats {
@@ -490,19 +489,32 @@ body {
   border-color: var(--gold);
 }
 
+.goal-add-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
 .goal-add-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.goal-add-recurring {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-dim);
-  white-space: nowrap;
+.goal-add-row input[type="date"] {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 5px 6px;
+  border-radius: 3px;
+}
+
+.goal-add-row input[type="date"][hidden] {
+  display: none;
 }
 
 .goal-add-row select {
@@ -515,6 +527,36 @@ body {
   font-size: 12px;
   padding: 5px 6px;
   border-radius: 3px;
+}
+
+.goal-date-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.goal-date-settings label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.goal-date-settings input[type="number"] {
+  width: 34px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 2px;
+  padding: 1px 3px;
+  font-family: var(--mono);
+  font-size: 10px;
 }
 
 .goal-add-submit {

@@ -287,18 +287,22 @@ async function fetchIdeas() {
   if (focusId === null && flatOrder.length > 0) {
     selectCard(flatOrder[0]);
   }
+  populateGoalIdeaSelect(); // keeps the goal-add form's idea-link dropdown in sync
 }
 
-// ---- goals panel: dedicated view, separate from the idea board ----
+// ---- goals screen: its own full screen, not a side panel -- see
+// showScreen() below for how it and the board screen are switched ----
 
-const goalsPanel = document.getElementById("goals-panel");
-const goalsToggle = document.getElementById("goals-toggle");
 const goalsBadge = document.getElementById("goals-badge");
 const goalAddForm = document.getElementById("goal-add-form");
 const goalAddText = document.getElementById("goal-add-text");
-const goalAddRecurring = document.getElementById("goal-add-recurring");
 const goalAddIdea = document.getElementById("goal-add-idea");
 const goalListEl = document.getElementById("goal-list");
+const goalWeekdayPills = document.querySelectorAll(".goal-weekday-pill");
+const goalAddDate = document.getElementById("goal-add-date");
+const goalDateSmartDefaultInput = document.getElementById("goal-date-smart-default");
+const goalDateCutoffHourInput = document.getElementById("goal-date-cutoff-hour");
+let selectedGoalWeekdays = new Set();
 
 async function fetchGoalsData() {
   const [goalsRes, streakRes] = await Promise.all([
@@ -309,8 +313,76 @@ async function fetchGoalsData() {
   todaysGoals = goalsPayload.goals;
   streakInfo = await streakRes.json();
   renderGoalsBadge();
-  if (!goalsPanel.hidden) renderGoalsPanel();
+  if (currentScreen === "goals") renderGoalsPanel();
 }
+
+// ---- smart-default date: after a configurable cutoff hour (default 6pm),
+// a new one-off goal's date field defaults to tomorrow instead of today --
+// matches planning tomorrow's goals before closing the laptop for the
+// night. Always just an editable default, never forced: updateGoalAddDateVisibility
+// only fills the field when it's empty, so a value you've already typed or
+// changed is never clobbered. Pure GUI/localStorage state, same as the
+// theme toggle -- no CLI equivalent, and none is needed. ----
+
+const GOAL_DATE_SMART_DEFAULT_KEY = "idea-bank-goal-date-smart-default";
+const GOAL_DATE_CUTOFF_HOUR_KEY = "idea-bank-goal-date-cutoff-hour";
+const DEFAULT_GOAL_DATE_CUTOFF_HOUR = 18;
+
+function loadGoalDateSettings() {
+  let smartDefault = true;
+  let cutoffHour = DEFAULT_GOAL_DATE_CUTOFF_HOUR;
+  try {
+    const storedEnabled = localStorage.getItem(GOAL_DATE_SMART_DEFAULT_KEY);
+    if (storedEnabled !== null) smartDefault = storedEnabled !== "off";
+    const storedCutoff = Number(localStorage.getItem(GOAL_DATE_CUTOFF_HOUR_KEY));
+    if (Number.isInteger(storedCutoff) && storedCutoff >= 0 && storedCutoff <= 23) {
+      cutoffHour = storedCutoff;
+    }
+  } catch {
+    // localStorage unavailable (private browsing, etc.) -- just the defaults above
+  }
+  goalDateSmartDefaultInput.checked = smartDefault;
+  goalDateCutoffHourInput.value = cutoffHour;
+  return { smartDefault, cutoffHour };
+}
+
+function saveGoalDateSettings() {
+  try {
+    localStorage.setItem(GOAL_DATE_SMART_DEFAULT_KEY, goalDateSmartDefaultInput.checked ? "on" : "off");
+    localStorage.setItem(GOAL_DATE_CUTOFF_HOUR_KEY, goalDateCutoffHourInput.value);
+  } catch {
+    // won't persist across reloads, but still applies for the rest of this session
+  }
+}
+
+function computeSmartDefaultDate() {
+  const { smartDefault, cutoffHour } = loadGoalDateSettings();
+  const target = new Date();
+  if (smartDefault && target.getHours() >= cutoffHour) target.setDate(target.getDate() + 1);
+  const y = target.getFullYear();
+  const m = String(target.getMonth() + 1).padStart(2, "0");
+  const d = String(target.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function updateGoalAddDateVisibility() {
+  const oneOff = selectedGoalWeekdays.size === 0;
+  goalAddDate.hidden = !oneOff;
+  if (oneOff && !goalAddDate.value) goalAddDate.value = computeSmartDefaultDate();
+}
+
+goalWeekdayPills.forEach((pill) => {
+  pill.addEventListener("click", () => {
+    const day = Number(pill.dataset.weekday);
+    pill.classList.toggle("selected");
+    if (selectedGoalWeekdays.has(day)) selectedGoalWeekdays.delete(day);
+    else selectedGoalWeekdays.add(day);
+    updateGoalAddDateVisibility();
+  });
+});
+
+goalDateSmartDefaultInput.addEventListener("change", saveGoalDateSettings);
+goalDateCutoffHourInput.addEventListener("change", saveGoalDateSettings);
 
 function renderGoalsBadge() {
   goalsBadge.textContent = `${streakInfo.today_done}/${streakInfo.today_total}`;
@@ -349,6 +421,17 @@ function renderGoalsPanel() {
   }
 }
 
+const WEEKDAY_DISPLAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function formatWeekdays(weekdays) {
+  if (!weekdays) return "one-off";
+  const days = new Set(weekdays);
+  if (days.size === 7) return "daily";
+  if (days.size === 5 && [0, 1, 2, 3, 4].every((d) => days.has(d))) return "weekdays";
+  if (days.size === 2 && days.has(5) && days.has(6)) return "weekends";
+  return [...days].sort((a, b) => a - b).map((d) => WEEKDAY_DISPLAY[d]).join("/");
+}
+
 function buildGoalRow(goal) {
   const row = document.createElement("div");
   row.className = "goal-row" + (goal.completed_at ? " done" : "");
@@ -372,7 +455,7 @@ function buildGoalRow(goal) {
 
   const recurTag = document.createElement("span");
   recurTag.className = "goal-tag";
-  recurTag.textContent = goal.recurring ? "daily" : "one-off";
+  recurTag.textContent = formatWeekdays(goal.weekdays);
   meta.appendChild(recurTag);
 
   const linkedIdea = goal.idea_id ? ideas.find((i) => i.id === goal.idea_id) : null;
@@ -382,7 +465,7 @@ function buildGoalRow(goal) {
     ideaTag.textContent = linkedIdea.text.length <= 24 ? linkedIdea.text : linkedIdea.text.slice(0, 21) + "...";
     ideaTag.title = "jump to this idea on the board";
     ideaTag.addEventListener("click", () => {
-      closeGoalsPanel();
+      showScreen("board");
       selectCard(linkedIdea.id);
     });
     meta.appendChild(ideaTag);
@@ -391,7 +474,7 @@ function buildGoalRow(goal) {
 
   const actions = document.createElement("div");
   actions.className = "goal-row-actions";
-  if (goal.recurring) {
+  if (goal.weekdays) {
     const stopBtn = document.createElement("button");
     stopBtn.type = "button";
     stopBtn.textContent = "stop";
@@ -436,7 +519,10 @@ goalAddForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = goalAddText.value.trim();
   if (!text) return;
-  const payload = { text, recurring: goalAddRecurring.checked };
+  const weekdays = [...selectedGoalWeekdays];
+  const payload = { text };
+  if (weekdays.length > 0) payload.weekdays = weekdays;
+  else if (goalAddDate.value) payload.target_date = goalAddDate.value;
   if (goalAddIdea.value) payload.idea_id = Number(goalAddIdea.value);
 
   const res = await fetch("/api/goals", {
@@ -447,29 +533,43 @@ goalAddForm.addEventListener("submit", async (e) => {
   if (!res.ok) return;
 
   goalAddText.value = "";
-  goalAddRecurring.checked = false;
+  selectedGoalWeekdays.clear();
+  goalWeekdayPills.forEach((p) => p.classList.remove("selected"));
+  goalAddDate.value = "";
   goalAddIdea.value = "";
+  updateGoalAddDateVisibility(); // refills with a fresh smart default for the next add
   await fetchGoalsData();
   goalAddText.focus();
 });
 
-function openGoalsPanel() {
-  goalsPanel.hidden = false;
-  populateGoalIdeaSelect();
-  renderGoalsPanel();
+// ---- screens: goals and board are full-screen sibling sections, switched
+// by the top-bar tabs (or g/i) -- goals is the default on load. Both stay
+// fetched regardless of which is visible, so switching is instant. ----
+
+const screenTabs = document.querySelectorAll(".screen-tab");
+const goalsScreenEl = document.getElementById("goals-screen");
+const boardScreenEl = document.getElementById("board-screen");
+let currentScreen = "goals";
+
+function showScreen(name) {
+  currentScreen = name;
+  goalsScreenEl.hidden = name !== "goals";
+  boardScreenEl.hidden = name !== "board";
+  screenTabs.forEach((tab) => {
+    const active = tab.dataset.screen === name;
+    tab.classList.toggle("selected", active);
+    tab.setAttribute("aria-selected", String(active));
+  });
+  if (name === "goals") {
+    populateGoalIdeaSelect();
+    renderGoalsPanel();
+    updateGoalAddDateVisibility();
+  }
 }
 
-function closeGoalsPanel() {
-  goalsPanel.hidden = true;
-}
-
-function toggleGoalsPanel() {
-  if (goalsPanel.hidden) openGoalsPanel();
-  else closeGoalsPanel();
-}
-
-goalsToggle.addEventListener("click", toggleGoalsPanel);
-document.getElementById("goals-panel-close").addEventListener("click", closeGoalsPanel);
+screenTabs.forEach((tab) => {
+  tab.addEventListener("click", () => showScreen(tab.dataset.screen));
+});
 
 async function createIdea(text, status) {
   const res = await fetch("/api/ideas", {
@@ -902,7 +1002,10 @@ document.addEventListener("keydown", (e) => {
       applyStatusToSelected("frontier");
       break;
     case "g":
-      toggleGoalsPanel();
+      showScreen("goals");
+      break;
+    case "i":
+      showScreen("board");
       break;
     case "v":
       toggleVisualMode();
@@ -922,8 +1025,7 @@ document.addEventListener("keydown", (e) => {
       deleteSelected();
       break;
     case "Escape":
-      if (!goalsPanel.hidden) closeGoalsPanel();
-      else if (visualAnchorId !== null) exitVisualMode();
+      if (visualAnchorId !== null) exitVisualMode();
       break;
     case "/":
       e.preventDefault();
@@ -934,6 +1036,7 @@ document.addEventListener("keydown", (e) => {
 
 window.addEventListener("load", () => {
   if (window.location.hash === "#horizon") {
+    showScreen("board");
     const col = document.querySelector('.column[data-status="horizon"]');
     if (col) col.scrollIntoView({ inline: "start" });
   }
@@ -948,5 +1051,6 @@ setInterval(() => {
   });
 }, 30000);
 
+showScreen("goals");
 fetchIdeas();
 fetchGoalsData();

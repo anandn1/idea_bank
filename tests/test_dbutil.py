@@ -249,18 +249,70 @@ def test_ensure_frontier_status_is_idempotent(db_path):
     dbutil.add_idea("x", status="frontier")  # would raise if the CHECK weren't widened
 
 
+# ---- _ensure_goal_weekdays ----
+
+
+def test_ensure_goal_weekdays_rebuilds_old_recurring_column(db_path):
+    """Simulates a DB created before weekday-set recurrence existed."""
+    raw = sqlite3.connect(db_path)
+    raw.execute("""
+        CREATE TABLE goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            idea_id INTEGER,
+            recurring INTEGER NOT NULL DEFAULT 0,
+            target_date TEXT,
+            created_at TEXT NOT NULL,
+            archived_at TEXT
+        )
+        """)
+    cur_recurring = raw.execute(
+        "INSERT INTO goals (text, recurring, created_at) VALUES ('old daily', 1, 'x')"
+    )
+    recurring_id = cur_recurring.lastrowid
+    cur_one_off = raw.execute(
+        "INSERT INTO goals (text, recurring, target_date, created_at) "
+        "VALUES ('old one-off', 0, '2026-09-05', 'x')"
+    )
+    one_off_id = cur_one_off.lastrowid
+    raw.commit()
+    raw.close()
+
+    conn = dbutil.get_conn()  # runs the migration
+    recurring_row = dbutil.get_goal(conn, recurring_id)
+    one_off_row = dbutil.get_goal(conn, one_off_id)
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(goals)")}
+    conn.close()
+
+    assert "recurring" not in columns
+    assert "weekdays" in columns
+    assert recurring_row["weekdays"] == [0, 1, 2, 3, 4, 5, 6]
+    assert recurring_row["target_date"] is None
+    assert one_off_row["weekdays"] is None
+    assert one_off_row["target_date"] == "2026-09-05"
+
+
+def test_ensure_goal_weekdays_is_idempotent(db_path):
+    dbutil.get_conn().close()
+    dbutil.get_conn().close()
+    dbutil.get_conn().close()
+
+
 # ---- goals ----
 #
 # A goal is its own thing (own text), optionally linked to an idea, always
-# self-reported as done -- never derived from an idea's status.
+# self-reported as done -- never derived from an idea's status. Recurrence
+# is a weekday set (Monday=0..Sunday=6), not a boolean -- daily is just all
+# seven days.
 
 
-def _insert_recurring_goal(conn, text, created_at_date):
-    """Backdate a recurring goal's created_at so streak tests can control
-    which days it's due on, instead of racing the real current date."""
+def _insert_recurring_goal(conn, text, created_at_date, weekdays="0,1,2,3,4,5,6"):
+    """Backdate a goal's created_at so streak tests can control which days
+    it's due on, instead of racing the real current date. Defaults to daily
+    so every existing call site keeps its current behavior."""
     conn.execute(
-        "INSERT INTO goals (text, recurring, created_at) VALUES (?, 1, ?)",
-        (text, f"{created_at_date} 08:00:00"),
+        "INSERT INTO goals (text, weekdays, created_at) VALUES (?, ?, ?)",
+        (text, weekdays, f"{created_at_date} 08:00:00"),
     )
     conn.commit()
     return conn.execute("SELECT id FROM goals WHERE text = ?", (text,)).fetchone()["id"]
@@ -269,19 +321,32 @@ def _insert_recurring_goal(conn, text, created_at_date):
 def test_create_goal_one_off_defaults_target_date_to_today(conn):
     goal = dbutil.create_goal(conn, "x")
     assert goal["target_date"] == dbutil.today_str()
-    assert goal["recurring"] == 0
+    assert goal["weekdays"] is None
     assert goal["idea_id"] is None
 
 
-def test_create_goal_recurring_ignores_target_date(conn):
-    goal = dbutil.create_goal(conn, "x", recurring=True, target_date="2026-09-05")
+def test_create_goal_weekdays_ignores_target_date(conn):
+    goal = dbutil.create_goal(
+        conn, "x", weekdays=[0, 1, 2, 3, 4, 5, 6], target_date="2026-09-05"
+    )
     assert goal["target_date"] is None
-    assert goal["recurring"] == 1
+    assert goal["weekdays"] == [0, 1, 2, 3, 4, 5, 6]
+
+
+def test_create_goal_weekdays_deduped_and_sorted(conn):
+    goal = dbutil.create_goal(conn, "x", weekdays=[4, 0, 2, 0])
+    assert goal["weekdays"] == [0, 2, 4]
+
+
+def test_create_goal_empty_weekdays_list_is_one_off(conn):
+    goal = dbutil.create_goal(conn, "x", weekdays=[])
+    assert goal["weekdays"] is None
+    assert goal["target_date"] == dbutil.today_str()
 
 
 def test_create_goal_with_idea_link(conn):
     idea_id = dbutil.add_idea("run every day")
-    goal = dbutil.create_goal(conn, "walk 10000 steps", idea_id=idea_id, recurring=True)
+    goal = dbutil.create_goal(conn, "walk 10000 steps", idea_id=idea_id, weekdays=[0])
     assert goal["idea_id"] == idea_id
 
 
@@ -299,6 +364,15 @@ def test_goals_due_on_recurring_due_every_day_since_creation(conn):
     assert dbutil.goals_due_on(conn, "2026-08-31") == []  # before creation
     assert len(dbutil.goals_due_on(conn, "2026-09-01")) == 1
     assert len(dbutil.goals_due_on(conn, "2026-09-10")) == 1
+
+
+def test_goals_due_on_weekday_set_only_matches_those_weekdays(conn):
+    # 2026-09-01 is a Tuesday, 2026-09-07 is a Monday
+    _insert_recurring_goal(conn, "monday workout", "2026-09-01", weekdays="0")
+    assert dbutil.goals_due_on(conn, "2026-09-01") == []  # Tuesday -- not due
+    due = dbutil.goals_due_on(conn, "2026-09-07")  # Monday -- due
+    assert len(due) == 1
+    assert due[0]["weekdays"] == [0]
 
 
 def test_goals_due_on_one_off_only_on_target_date(conn):
@@ -333,13 +407,13 @@ def test_stop_goal_only_works_on_recurring(conn):
     one_off = dbutil.create_goal(conn, "x")
     assert dbutil.stop_goal(conn, one_off["id"]) is False
 
-    recurring = dbutil.create_goal(conn, "y", recurring=True)
+    recurring = dbutil.create_goal(conn, "y", weekdays=[0, 1, 2, 3, 4, 5, 6])
     assert dbutil.stop_goal(conn, recurring["id"]) is True
     assert dbutil.stop_goal(conn, recurring["id"]) is False  # already stopped
 
 
 def test_stop_goal_removes_it_from_current_and_future_dates(conn):
-    goal = dbutil.create_goal(conn, "walk", recurring=True)
+    goal = dbutil.create_goal(conn, "walk", weekdays=[0, 1, 2, 3, 4, 5, 6])
     today = dbutil.today_str()
     assert len(dbutil.goals_due_on(conn, today)) == 1
 
@@ -443,6 +517,28 @@ def test_compute_streak_longest_survives_a_break(conn):
     info = dbutil.compute_streak(conn, today="2026-09-07")
     assert info["streak"] == 1
     assert info["longest"] == 5
+
+
+def test_compute_streak_weekday_gaps_are_skipped_not_broken(conn):
+    # Mondays only: 2026-09-07 and 2026-09-14 are Mondays; every day between
+    # them has nothing due (not Monday), which must be skipped, not a break.
+    goal_id = _insert_recurring_goal(conn, "monday workout", "2026-09-01", weekdays="0")
+    dbutil.set_goal_done(conn, goal_id, "2026-09-07", True)
+    dbutil.set_goal_done(conn, goal_id, "2026-09-14", True)
+
+    info = dbutil.compute_streak(conn, today="2026-09-14")
+    assert info["streak"] == 2
+    assert info["today_total"] == 1
+    assert info["today_complete"] is True
+
+
+def test_compute_streak_weekday_goal_breaks_on_missed_weekday(conn):
+    goal_id = _insert_recurring_goal(conn, "monday workout", "2026-09-01", weekdays="0")
+    # 2026-09-07 (a Monday) is due but never marked done
+    dbutil.set_goal_done(conn, goal_id, "2026-09-14", True)  # the next Monday
+
+    info = dbutil.compute_streak(conn, today="2026-09-14")
+    assert info["streak"] == 1  # only today's Monday counts -- last Monday was missed
 
 
 def test_total_xp_counts_completed_goal_days(conn):

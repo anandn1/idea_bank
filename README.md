@@ -115,41 +115,54 @@ given), and every idea in `GET /api/ideas` includes `"fields"`.
 
 **Goals** — a goal is its own thing, with its own text (`"walk 10000 steps"`),
 separate from ideas. Ideas are the long-term objectives; goals are the
-concrete steps you take toward one, day to day -- so a goal can *optionally*
-link to an idea (`"run 5k"` → the idea `"run every day"`), but plenty of
-goals won't link to anything at all. A goal is either:
+milestones you reach toward one -- so a goal can *optionally* link to an
+idea (`"run 5k"` → the idea `"run every day"`), but plenty of goals won't
+link to anything at all. A goal is either:
 
-- **recurring** — due every day (a habit) until you stop it; history from
-  before you stopped it is kept
-- **one-off** — due on a single date (default: today)
+- **recurring**, due on whichever day(s) of the week you pick — check all
+  seven for a daily habit, five for weekdays-only, one for a weekly
+  check-in, or any other subset (e.g. Mon/Wed/Fri) for a milestone
+  schedule. Due every matching week from creation until you stop it;
+  history from before you stopped it is kept.
+- **one-off**, due on a single date — any date at all, not just today.
+  Defaults to today if you don't say otherwise.
 
 Completion is always **self-reported** — you check a goal off yourself, in
 the CLI or the GUI. It is never derived from an idea's status, since most
 goals (the steps example) have no status to derive from. History is
 persisted, so there's a real streak (an unfinished today doesn't break it,
-it's just not counted yet, and a day with nothing due is skipped rather than
-counted as a miss) and a lifetime xp count (total completed goal-days, no
-arbitrary point weighting).
+it's just not counted yet, and a day with nothing due — including a day
+that isn't one of a goal's chosen weekdays — is skipped rather than counted
+as a miss) and a lifetime xp count (total completed goal-days, no arbitrary
+point weighting).
 
 ```
-idea goal add "walk 10000 steps" --recurring        a daily habit, no idea link
-idea goal add "draft the proposal" --idea 12         a one-off step toward idea #12
-idea goal list                                       show today's due goals
-idea goal done 5                                     mark goal #5 done for today
-idea goal undo 5                                     unmark it
-idea goal stop 5                                     stop a recurring goal (keeps history)
-idea goal remove 5                                   delete a goal and its history
-idea goal streak                                     current streak and lifetime xp
+idea goal add "walk 10000 steps" --weekdays daily      every day, no idea link
+idea goal add "gym" --weekdays mon,wed,fri               specific weekdays
+idea goal add "draft the proposal" --idea 12 --date 2026-10-01
+                                                           one-off, any date
+idea goal list                                          show today's due goals
+idea goal done 5                                        mark goal #5 done for today
+idea goal undo 5                                        unmark it
+idea goal stop 5                                        stop a recurring goal (keeps history)
+idea goal remove 5                                      delete a goal and its history
+idea goal streak                                        current streak and lifetime xp
 ```
 
-The same thing from the GUI lives in its own panel, separate from the idea
-board: press `g` (or click the `goals` button in the top bar) to open it.
-Add a goal with optional "daily" and idea-link controls, check items off,
-and `stop`/delete existing ones. The top-bar button shows a compact `x/y`
-badge (gold once today's goals are all done) so you can see progress without
-opening the panel. The panel is a non-blocking side drawer -- the board
-underneath stays fully usable (keyboard shortcuts, drag-and-drop) while it's
-open.
+The same thing from the GUI is its own **full screen**, and it's the one you
+land on first — press `g` (or click the `goals` tab in the top bar) to get
+back to it, `i` (or the `ideas` tab) switches to the idea board. Add a goal
+with the day-of-week pills (none selected = one-off, with a date field that
+defaults intelligently: before a configurable cutoff hour it suggests today,
+at/after it suggests tomorrow — matching planning tomorrow's goals before
+closing the laptop for the night; always just a starting point, editable
+either way) and an idea-link dropdown, check items off, `stop`/delete
+existing ones. The top-bar `goals` tab shows a compact `x/y` badge (gold
+once today's goals are all done). The smart-default cutoff (and an option to
+turn it off entirely) is a per-browser preference, not stored in the
+database -- same as the theme toggle, it has no CLI equivalent because
+there's nothing for it to default *for* on the command line, where you
+always say the date explicitly.
 
 Deleting an idea that a goal links to **unlinks** it rather than deleting the
 goal -- the goal and its history are independent of the idea's lifecycle, so
@@ -157,31 +170,34 @@ they survive (CLI, GUI, and the JSON API `DELETE /api/ideas/<id>` all do
 this).
 
 JSON API: `GET /api/goals?date=` (today's due goals, default today),
-`POST /api/goals {"text": ..., "idea_id": ..., "recurring": ..., "target_date": ...}`,
-`PATCH /api/goals/<id> {"completed": true/false, "date": ...}`,
+`POST /api/goals {"text": ..., "idea_id": ..., "weekdays": [0,2,4], "target_date": ...}`
+(`weekdays` is Monday=0..Sunday=6; a non-empty list makes the goal recurring
+and `target_date` doesn't apply, same mutual exclusivity as `--weekdays`/
+`--date` on the CLI), `PATCH /api/goals/<id> {"completed": true/false, "date": ...}`,
 `POST /api/goals/<id>/stop`, `DELETE /api/goals/<id>`, `GET /api/goals/streak`.
 
 **GUI** — `server.py` serves `static/index.html` and a small JSON API
 (`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`, plus the goals routes
-above) backed by the same SQLite file. `static/app.js` renders six columns
-(Inbox, Active, Queued, Horizon, Frontier, Archive) and covers the same
-ground as the CLI, keyboard-first:
+above) backed by the same SQLite file. `static/app.js` renders two full
+screens -- **goals** (the default) and the **board** (six columns: Inbox,
+Active, Queued, Horizon, Frontier, Archive), switched by a persistent
+top-bar tab pair -- and covers the same ground as the CLI, keyboard-first:
 
 - Typing anywhere outside the capture box is a shortcut; the capture input
-  itself is auto-focused on load and via `/`.
+  itself is auto-focused on load and via `/`, and works from either screen.
 - **Capture-to-status**: pills next to the capture input (click, or
   Alt+I/A/Q/H/F/X while the input is focused) choose where the next capture
   goes; it resets to Inbox after each capture, matching the CLI's per-call
   default.
+- `g` / `i` (or the top-bar tabs) switch between the **goals** and **board**
+  screens — see **Goals** above.
 - `j` / `k` or `↓` / `↑` move the focus between idea cards (flattened across
-  all six columns, left to right).
+  all six columns, left to right) -- on the board screen.
 - `a` / `q` / `h` / `f` / `x` move the focused (or selected, see below)
   card(s). A single card slides into its new column — the one deliberate
   motion in the UI, skipped automatically under `prefers-reduced-motion`;
   moving more than one at once re-renders directly instead, since several
   simultaneous slides across columns read as noise, not signal.
-- `g` opens/closes the **goals panel** — see **Goals** above. It's a separate
-  view from the board, not a per-card action.
 - `e` edits the focused card's text in place (Enter saves, Escape cancels,
   clicking away saves) — the GUI equivalent of `idea edit`.
 - `d` (or Delete/Backspace) deletes the selected card(s), after a confirm
@@ -190,7 +206,7 @@ ground as the CLI, keyboard-first:
   range from wherever `v` was pressed, a status bar shows the count, and
   `a`/`q`/`h`/`f`/`x`/`d` then apply to every selected card at once — the GUI
   equivalent of the CLI's batch `move`/`delete`. `Escape` cancels back to a
-  single selection (or, if the goals panel is open, closes that first).
+  single selection.
 - **Enter** (or double-click, or drag) opens the focused card's **detail
   view** — a modal with the full text (editable), status (as pills), every
   structured field (editable, with an "add field" row), freeform notes, and
@@ -375,9 +391,19 @@ you're ready to touch that file.
   the new shape.
 - **Streak math skips days with nothing due rather than penalizing them.**
   `dbutil.compute_streak()` walks backward from today; a day before any goal
-  existed, or after every goal covering it was stopped, neither extends nor
-  breaks the streak. Only a day where something was due and wasn't
-  completed breaks it.
+  existed, after every goal covering it was stopped, or that just isn't one
+  of a recurring goal's chosen weekdays, neither extends nor breaks the
+  streak. Only a day where something was due and wasn't completed breaks it.
+- **Weekday convention: Python's `date.weekday()` (Monday=0..Sunday=6), not
+  JS's `Date.getDay()` (Sunday=0).** Chosen so the backend (`dbutil.py`) and
+  every stored `weekdays` value never need to convert; the GUI's weekday
+  pills carry Python-convention values directly in their markup, so no
+  conversion happens there either in practice.
+- **The goal-date smart-default cutoff is GUI-only, `localStorage` state,
+  same as the theme toggle.** There's nothing for it to default *for* on
+  the CLI, where a one-off goal's date is always given explicitly (or
+  defaults to plain today, with no notion of "it's evening, suggest
+  tomorrow").
 - **Corruption heuristics for migration** are pattern-based (blank text,
   shell-history/path markers) rather than hardcoded to the two known bad
   lines, so the script stays useful if `inbox.md` grows more such lines

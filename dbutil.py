@@ -14,7 +14,8 @@ import os
 import sqlite3
 import sys
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import date as date_cls
+from datetime import datetime, timedelta
 from pathlib import Path
 
 try:
@@ -62,18 +63,24 @@ CREATE TABLE IF NOT EXISTS ideas (
 );
 """
 
-SCHEMA = f"""
-{IDEAS_TABLE}
+GOAL_COLUMNS = "id, text, idea_id, weekdays, target_date, created_at, archived_at"
 
+GOALS_TABLE = """
 CREATE TABLE IF NOT EXISTS goals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     text TEXT NOT NULL,
     idea_id INTEGER,
-    recurring INTEGER NOT NULL DEFAULT 0,
+    weekdays TEXT,
     target_date TEXT,
     created_at TEXT NOT NULL,
     archived_at TEXT
 );
+"""
+
+SCHEMA = f"""
+{IDEAS_TABLE}
+
+{GOALS_TABLE}
 
 CREATE TABLE IF NOT EXISTS goal_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,6 +223,35 @@ def _ensure_frontier_status(conn: sqlite3.Connection) -> None:
         """)
 
 
+def _ensure_goal_weekdays(conn: sqlite3.Connection) -> None:
+    """Replace the boolean `recurring` column with `weekdays` (a comma-
+    joined set of Python date.weekday() values, Monday=0..Sunday=6; NULL
+    means one-off, using target_date same as before). SQLite can't drop a
+    column in place any more than it can ALTER a CHECK constraint -- same
+    rename/create/copy/drop dance as _ensure_frontier_status, guarded so it
+    runs once. Backfill: an old recurring=1 row becomes due every day of
+    the week; recurring=0 keeps its target_date, gets no weekdays.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'goals'"
+    ).fetchone()
+    if row is None or "weekdays" in row["sql"]:
+        return
+
+    conn.executescript(f"""
+        BEGIN;
+        ALTER TABLE goals RENAME TO goals_pre_weekdays;
+        {GOALS_TABLE}
+        INSERT INTO goals ({GOAL_COLUMNS})
+            SELECT id, text, idea_id,
+                   CASE WHEN recurring = 1 THEN '0,1,2,3,4,5,6' ELSE NULL END,
+                   target_date, created_at, archived_at
+            FROM goals_pre_weekdays;
+        DROP TABLE goals_pre_weekdays;
+        COMMIT;
+        """)
+
+
 def _migrate_from_v1_daily_goals(conn: sqlite3.Connection) -> None:
     """One-time bridge off the first cut of daily goals (idea-tag-based,
     required an idea, auto-completed via status change). Replaced by the
@@ -245,6 +281,7 @@ def get_conn() -> sqlite3.Connection:
     conn.executescript(SCHEMA)
     _ensure_fields_column(conn)
     _ensure_frontier_status(conn)
+    _ensure_goal_weekdays(conn)
     _migrate_from_v1_daily_goals(conn)
     _ensure_encrypted_content(conn)
     return conn
@@ -340,9 +377,11 @@ def update_idea(conn: sqlite3.Connection, idea_id: int, updates: dict) -> dict |
 # A goal is its own thing -- its own text, e.g. "walk 10000 steps" -- not a
 # tagged idea. It can optionally point at an idea (a concrete step toward
 # that longer-term objective) but doesn't have to. A goal is either:
-#   - recurring: due every day from its created_at date until it's stopped
-#     (archived_at set), e.g. a daily habit
-#   - one-off: due on exactly one target_date
+#   - recurring: due on whichever weekday(s) it's set to (Monday=0..Sunday=6),
+#     from its created_at date until it's stopped (archived_at set) -- all
+#     seven days is a daily habit, one day is a weekly check-in, any other
+#     subset is a milestone schedule like "Mon/Wed/Fri"
+#   - one-off: due on exactly one target_date, which can be any date at all
 # Completion is always self-reported into goal_log, one row per
 # (goal_id, date) -- never derived from an idea's status, since most goals
 # (the steps-walked example) have no idea, and thus no status, to derive
@@ -357,23 +396,26 @@ def create_goal(
     conn: sqlite3.Connection,
     text: str,
     idea_id: int | None = None,
-    recurring: bool = False,
+    weekdays: list[int] | None = None,
     target_date: str | None = None,
 ) -> dict | None:
-    """Returns None if idea_id is given but doesn't exist. A recurring goal
-    ignores target_date (it's due every day); a one-off goal defaults to
-    today if target_date isn't given."""
+    """Returns None if idea_id is given but doesn't exist. A non-empty
+    `weekdays` (Monday=0..Sunday=6) makes the goal recurring and ignores
+    target_date; otherwise it's one-off, defaulting target_date to today if
+    not given."""
     if idea_id is not None and get_idea(conn, idea_id) is None:
         return None
-    if not recurring and target_date is None:
+    weekdays = sorted(set(weekdays)) if weekdays else None
+    if weekdays is None and target_date is None:
         target_date = today_str()
-    if recurring:
+    if weekdays is not None:
         target_date = None
+    weekdays_str = ",".join(str(d) for d in weekdays) if weekdays else None
 
     cur = conn.execute(
-        "INSERT INTO goals (text, idea_id, recurring, target_date, created_at) "
+        "INSERT INTO goals (text, idea_id, weekdays, target_date, created_at) "
         "VALUES (?, ?, ?, ?, ?)",
-        (encrypt_str(text), idea_id, 1 if recurring else 0, target_date, now_str()),
+        (encrypt_str(text), idea_id, weekdays_str, target_date, now_str()),
     )
     conn.commit()
     return get_goal(conn, cur.lastrowid)
@@ -382,6 +424,9 @@ def create_goal(
 def row_to_goal(row: sqlite3.Row) -> dict:
     goal = dict(row)
     goal["text"] = decrypt_str(goal["text"])
+    goal["weekdays"] = (
+        [int(d) for d in goal["weekdays"].split(",")] if goal["weekdays"] else None
+    )
     return goal
 
 
@@ -407,7 +452,7 @@ def stop_goal(conn: sqlite3.Connection, goal_id: int) -> bool:
     already stopped."""
     cur = conn.execute(
         "UPDATE goals SET archived_at = ? "
-        "WHERE id = ? AND recurring = 1 AND archived_at IS NULL",
+        "WHERE id = ? AND weekdays IS NOT NULL AND archived_at IS NULL",
         (now_str(), goal_id),
     )
     conn.commit()
@@ -430,20 +475,27 @@ def unlink_goals_from_idea(conn: sqlite3.Connection, idea_id: int) -> None:
 
 
 def goals_due_on(conn: sqlite3.Connection, date: str) -> list[dict]:
-    """Every goal due on `date`: recurring goals active that day, plus
-    one-off goals targeting it exactly. completed_at comes from goal_log if
-    a row exists for that day, else NULL (nothing logged = not done)."""
+    """Every goal due on `date`: recurring goals active that day *and*
+    scheduled for that weekday, plus one-off goals targeting it exactly.
+    completed_at comes from goal_log if a row exists for that day, else
+    NULL (nothing logged = not done). The weekday check happens in Python
+    (after decoding `weekdays` via row_to_goal) rather than SQL -- a goal
+    whose active window matches but whose weekday doesn't is simply left
+    out of the result, same as a goal with nothing due at all, which is
+    exactly what compute_streak's day-skipping already expects."""
     rows = conn.execute(
         "SELECT g.*, gl.completed_at AS completed_at "
         "FROM goals g "
         "LEFT JOIN goal_log gl ON gl.goal_id = g.id AND gl.date = ? "
-        "WHERE (g.recurring = 1 AND date(g.created_at) <= date(?) "
+        "WHERE (g.weekdays IS NOT NULL AND date(g.created_at) <= date(?) "
         "       AND (g.archived_at IS NULL OR date(g.archived_at) > date(?))) "
-        "   OR (g.recurring = 0 AND g.target_date = ?) "
+        "   OR (g.weekdays IS NULL AND g.target_date = ?) "
         "ORDER BY g.created_at",
         (date, date, date, date),
     ).fetchall()
-    return [row_to_goal(row) for row in rows]
+    weekday = date_cls.fromisoformat(date).weekday()
+    goals = [row_to_goal(row) for row in rows]
+    return [g for g in goals if g["weekdays"] is None or weekday in g["weekdays"]]
 
 
 def set_goal_done(
@@ -472,9 +524,9 @@ def set_goal_done(
 def _earliest_goal_date(conn: sqlite3.Connection) -> str | None:
     row = conn.execute(
         "SELECT MIN(d) AS floor FROM ("
-        "  SELECT date(created_at) AS d FROM goals WHERE recurring = 1"
+        "  SELECT date(created_at) AS d FROM goals WHERE weekdays IS NOT NULL"
         "  UNION ALL"
-        "  SELECT target_date AS d FROM goals WHERE recurring = 0"
+        "  SELECT target_date AS d FROM goals WHERE weekdays IS NULL"
         ")"
     ).fetchone()
     return row["floor"]
@@ -493,8 +545,6 @@ def compute_streak(conn: sqlite3.Connection, today: str | None = None) -> dict:
     """Walk backward from `today`, counting consecutive won days. A day with
     nothing due is skipped, not counted and not a break. An unfinished
     today doesn't break the streak -- it's just not counted until it's won."""
-    from datetime import date as date_cls, timedelta
-
     today_d = date_cls.fromisoformat(today) if today else date_cls.today()
     floor = _earliest_goal_date(conn)
 

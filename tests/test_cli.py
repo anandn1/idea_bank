@@ -303,21 +303,54 @@ def test_move_to_frontier(run_cli):
 def test_goal_add_one_off(run_cli):
     goal = parse(run_cli("goal", "add", "walk 10000 steps", "--json"))
     assert goal["text"] == "walk 10000 steps"
-    assert goal["recurring"] == 0
+    assert goal["weekdays"] is None
     assert goal["idea_id"] is None
 
 
-def test_goal_add_recurring(run_cli):
-    goal = parse(run_cli("goal", "add", "walk 10000 steps", "--recurring", "--json"))
-    assert goal["recurring"] == 1
+def test_goal_add_weekdays_daily(run_cli):
+    goal = parse(
+        run_cli("goal", "add", "walk 10000 steps", "--weekdays", "daily", "--json")
+    )
+    assert goal["weekdays"] == [0, 1, 2, 3, 4, 5, 6]
     assert goal["target_date"] is None
 
 
-def test_goal_add_recurring_with_date_fails(run_cli):
+def test_goal_add_weekdays_single_day(run_cli):
+    goal = parse(run_cli("goal", "add", "gym", "--weekdays", "mon", "--json"))
+    assert goal["weekdays"] == [0]
+
+
+def test_goal_add_weekdays_abbreviation_list_sorted_and_deduped(run_cli):
+    goal = parse(
+        run_cli("goal", "add", "gym", "--weekdays", "fri,mon,wed,mon", "--json")
+    )
+    assert goal["weekdays"] == [0, 2, 4]
+
+
+def test_goal_add_weekdays_weekdays_shorthand(run_cli):
+    goal = parse(run_cli("goal", "add", "standup", "--weekdays", "weekdays", "--json"))
+    assert goal["weekdays"] == [0, 1, 2, 3, 4]
+
+
+def test_goal_add_weekdays_invalid_value_fails(run_cli):
+    result = run_cli("goal", "add", "x", "--weekdays", "bogus", "--json")
+    assert result.returncode == 1
+    assert "invalid --weekdays" in parse(result)["error"]
+
+
+def test_goal_add_weekdays_with_date_fails(run_cli):
     result = run_cli(
-        "goal", "add", "walk", "--recurring", "--date", "2026-09-05", "--json"
+        "goal", "add", "walk", "--weekdays", "daily", "--date", "2026-09-05", "--json"
     )
     assert result.returncode == 1
+
+
+def test_goal_add_one_off_arbitrary_future_date(run_cli):
+    goal = parse(
+        run_cli("goal", "add", "review manuscript", "--date", "2026-12-25", "--json")
+    )
+    assert goal["target_date"] == "2026-12-25"
+    assert goal["weekdays"] is None
 
 
 def test_goal_add_linked_to_idea(run_cli):
@@ -382,10 +415,25 @@ def test_goal_done_batch(run_cli):
 
 
 def test_goal_stop_recurring_removes_it_from_todays_list(run_cli):
-    goal = parse(run_cli("goal", "add", "walk", "--recurring", "--json"))
+    goal = parse(run_cli("goal", "add", "walk", "--weekdays", "daily", "--json"))
     result = run_cli("goal", "stop", str(goal["id"]), "--json")
     assert result.returncode == 0
     assert parse(run_cli("goal", "list", "--json"))["goals"] == []
+
+
+def test_goal_list_weekday_tag_formatting(run_cli):
+    from datetime import date, timedelta
+
+    run_cli("goal", "add", "gym", "--weekdays", "mon,wed,fri", "--json")
+    # find the next Mon/Wed/Fri on or after today, so the goal is actually
+    # due on the date we ask about regardless of which day the suite runs
+    due_date = date.today()
+    while due_date.weekday() not in (0, 2, 4):
+        due_date += timedelta(days=1)
+
+    result = run_cli("goal", "list", "--date", due_date.isoformat())
+    assert result.returncode == 0
+    assert "Mon/Wed/Fri" in result.stdout
 
 
 def test_goal_stop_one_off_fails(run_cli):
