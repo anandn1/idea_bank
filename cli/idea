@@ -175,6 +175,10 @@ def build_epilog() -> str:
         "  idea edit 12 --unset-field owner    remove a field\n"
         "  idea show 12                        prints fields if the idea has any\n"
         "\n"
+        "Notes (freeform, same as the GUI detail view's notes box):\n"
+        '  idea edit 12 --notes "waiting on legal sign-off"\n'
+        "  idea edit 12 --unset-notes          clear notes\n"
+        "\n"
         "Goals (your own daily/one-off targets, optionally linked to an idea):\n"
         "  idea goal add \"walk 10000 steps\" --recurring   a daily habit\n"
         "  idea goal add \"draft the proposal\" --idea 12   a one-off step toward idea #12\n"
@@ -252,10 +256,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_json_flag(move)
 
     edit = subparsers.add_parser(
-        "edit", help="change an idea's text and/or its structured fields",
+        "edit", help="change an idea's text, notes, and/or its structured fields",
         description=(
-            "Rewrite a single idea's text and/or set/unset its structured fields "
-            "in place. Text is optional here -- omit it to only change fields."
+            "Rewrite a single idea's text, notes, and/or set/unset its structured "
+            "fields in place. Text is optional here -- omit it to leave it unchanged."
         ),
     )
     edit.add_argument("id", type=int, help="idea id")
@@ -267,6 +271,16 @@ def build_parser() -> argparse.ArgumentParser:
     edit.add_argument(
         "--unset-field", dest="unset_fields", action="append", metavar="key",
         help="remove a structured field (repeatable)",
+    )
+    notes_group = edit.add_mutually_exclusive_group()
+    notes_group.add_argument(
+        "--notes", metavar="text",
+        help="set freeform notes, replacing any existing notes -- the CLI equivalent "
+        "of the GUI detail view's notes field",
+    )
+    notes_group.add_argument(
+        "--unset-notes", action="store_true",
+        help="clear notes",
     )
     add_json_flag(edit)
 
@@ -497,8 +511,12 @@ def cmd_edit(args) -> int:
         return fail(args, err)
     unset_fields = args.unset_fields or []
 
-    if text is None and not field_updates and not unset_fields:
-        return fail(args, "nothing to change: pass new text, --field, and/or --unset-field")
+    if text is None and not field_updates and not unset_fields and args.notes is None and not args.unset_notes:
+        return fail(
+            args,
+            "nothing to change: pass new text, --field/--unset-field, "
+            "and/or --notes/--unset-notes",
+        )
 
     with dbutil.connection() as conn:
         idea = dbutil.get_idea(conn, args.id)
@@ -511,6 +529,10 @@ def cmd_edit(args) -> int:
         kwargs = {}
         if text is not None:
             kwargs["text"] = text
+        if args.notes is not None:
+            kwargs["notes"] = args.notes
+        elif args.unset_notes:
+            kwargs["notes"] = None
         if field_updates or unset_fields:
             merged = {**idea["fields"], **field_updates}
             for key in unset_fields:

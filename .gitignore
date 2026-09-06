@@ -2,5 +2,11 @@
 __pycache__/
 *.pyc
 data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
 data/*.log
 .pytest_cache/
+
+# project instructions for Claude Code -- kept local, not shared via the repo
+CLAUDE.md

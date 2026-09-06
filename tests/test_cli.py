@@ -231,6 +231,29 @@ def test_edit_missing_id_fails(run_cli):
     assert result.returncode == 1
 
 
+def test_edit_sets_notes(run_cli):
+    created = parse(run_cli("x", "--json"))
+    idea = parse(
+        run_cli("edit", str(created["id"]), "--notes", "waiting on legal", "--json")
+    )
+    assert idea["notes"] == "waiting on legal"
+
+
+def test_edit_unset_notes(run_cli):
+    created = parse(run_cli("x", "--json"))
+    run_cli("edit", str(created["id"]), "--notes", "temp", "--json")
+    idea = parse(run_cli("edit", str(created["id"]), "--unset-notes", "--json"))
+    assert idea["notes"] is None
+
+
+def test_edit_notes_and_unset_notes_together_fails(run_cli):
+    created = parse(run_cli("x", "--json"))
+    result = run_cli(
+        "edit", str(created["id"]), "--notes", "a", "--unset-notes", "--json"
+    )
+    assert result.returncode == 2  # argparse mutually-exclusive-group rejection
+
+
 # ---- delete ----
 
 
