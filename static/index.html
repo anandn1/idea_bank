@@ -9,22 +9,6 @@
 <body>
 <header class="topbar">
   <div class="brand"><span class="prompt">$</span> idea</div>
-  <form id="capture-form" class="capture-form" autocomplete="off">
-    <input
-      id="capture-input"
-      type="text"
-      placeholder="capture an idea and hit enter..."
-      autofocus
-    >
-  </form>
-  <div class="capture-target" id="capture-target" role="group" aria-label="capture target status">
-    <button type="button" class="target-pill selected" data-status="inbox">inbox</button>
-    <button type="button" class="target-pill" data-status="active">active</button>
-    <button type="button" class="target-pill" data-status="queued">queued</button>
-    <button type="button" class="target-pill" data-status="horizon">horizon</button>
-    <button type="button" class="target-pill" data-status="frontier">frontier</button>
-    <button type="button" class="target-pill" data-status="archive">archive</button>
-  </div>
   <div class="screen-tabs" id="screen-tabs" role="tablist">
     <button type="button" class="screen-tab selected" id="tab-goals" data-screen="goals" role="tab" aria-selected="true">
       goals <span class="goals-badge" id="goals-badge">0/0</span>
@@ -44,7 +28,6 @@
     <span><b>e</b> quick edit</span>
     <span><b>v</b> select range</span>
     <span><b>d</b> delete</span>
-    <span><b>/</b> capture</span>
   </div>
 </header>
 
@@ -70,7 +53,6 @@
         </div>
         <div class="goal-add-row">
           <input type="date" id="goal-add-date" class="goal-add-date">
-          <select id="goal-add-idea"><option value="">no linked idea</option></select>
           <button type="submit" class="goal-add-submit">add</button>
         </div>
       </form>

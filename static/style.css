@@ -110,37 +110,6 @@ body {
   color: var(--text-dim);
 }
 
-.capture-form {
-  flex: 1 1 180px;
-  min-width: 180px;
-}
-
-#capture-input {
-  width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-family: var(--sans);
-  font-size: 14px;
-  padding: 9px 12px;
-  border-radius: 3px;
-  outline: none;
-}
-
-#capture-input:focus {
-  border-color: var(--gold);
-}
-
-#capture-input::placeholder {
-  color: var(--text-dim);
-}
-
-.capture-target {
-  display: flex;
-  gap: 4px;
-  flex-shrink: 0;
-}
-
 .target-pill {
   font-family: var(--mono);
   font-size: 11px;
@@ -515,18 +484,6 @@ body {
 
 .goal-add-row input[type="date"][hidden] {
   display: none;
-}
-
-.goal-add-row select {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-family: var(--sans);
-  font-size: 12px;
-  padding: 5px 6px;
-  border-radius: 3px;
 }
 
 .goal-date-settings {

@@ -235,9 +235,13 @@ def build_epilog() -> str:
         "  idea goal undo 5                                unmark it\n"
         "  idea goal stop 5                                stop a recurring goal (keeps history)\n"
         "  idea goal remove 5                               delete a goal and its history\n"
+        "  idea goal link 5 12                              link an existing goal to idea #12\n"
+        "  idea goal unlink 5                               remove goal #5's idea link\n"
         "  idea goal streak                                 current streak and lifetime xp\n"
         "  Completion is always self-reported -- a goal never derives 'done' from\n"
         "  an idea's status, since most goals (like the steps example) have no idea.\n"
+        "  A goal doesn't need its idea to exist first -- add the goal, capture the\n"
+        "  idea whenever, then `goal link` them.\n"
         "\n"
         "Bare `idea some text` (no subcommand) is shorthand for `idea capture some text`.\n"
         "move/delete/show accept multiple ids in one call. Run `idea <command> --help`\n"
@@ -414,6 +418,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     goal_remove.add_argument("ids", type=int, nargs="+", metavar="id")
     add_json_flag(goal_remove)
+
+    goal_link = goal_sub.add_parser(
+        "link", help="link an existing goal to an idea (or change its link)",
+        description=(
+            "Set or change an existing goal's idea link -- for a goal created "
+            "before its idea existed, or one that should now point somewhere else."
+        ),
+    )
+    goal_link.add_argument("goal_id", type=int)
+    goal_link.add_argument("idea_id", type=int)
+    add_json_flag(goal_link)
+
+    goal_unlink = goal_sub.add_parser(
+        "unlink", help="remove one or more goals' idea link (keeps the goal itself)",
+    )
+    goal_unlink.add_argument("ids", type=int, nargs="+", metavar="id")
+    add_json_flag(goal_unlink)
 
     goal_streak = goal_sub.add_parser(
         "streak", help="show the current streak and lifetime xp",
@@ -716,6 +737,27 @@ def cmd_goal_remove(args) -> int:
     return 0
 
 
+def cmd_goal_link(args) -> int:
+    with dbutil.connection() as conn:
+        if dbutil.missing_goal_ids(conn, [args.goal_id]):
+            return fail(args, f"no goal with id {args.goal_id}")
+        if dbutil.get_idea(conn, args.idea_id) is None:
+            return fail(args, f"no idea with id {args.idea_id}")
+        goal = dbutil.link_goal(conn, args.goal_id, args.idea_id)
+    emit_goal(args, goal, "linked")
+    return 0
+
+
+def cmd_goal_unlink(args) -> int:
+    with dbutil.connection() as conn:
+        missing = dbutil.missing_goal_ids(conn, args.ids)
+        if missing:
+            return fail(args, f"no goal(s) with id(s): {', '.join(map(str, missing))}")
+        goals = [dbutil.unlink_goal(conn, goal_id) for goal_id in args.ids]
+    emit_goals(args, goals, "unlinked")
+    return 0
+
+
 def cmd_goal_list(args) -> int:
     date = args.date or dbutil.today_str()
     with dbutil.connection() as conn:
@@ -759,6 +801,8 @@ GOAL_COMMANDS = {
     "undo": cmd_goal_undo,
     "stop": cmd_goal_stop,
     "remove": cmd_goal_remove,
+    "link": cmd_goal_link,
+    "unlink": cmd_goal_unlink,
     "list": cmd_goal_list,
     "streak": cmd_goal_streak,
 }
@@ -768,7 +812,7 @@ def cmd_goal(args) -> int:
     if args.goal_command is None:
         return fail(
             args,
-            "missing goal subcommand: add/done/undo/stop/remove/list/streak "
+            "missing goal subcommand: add/done/undo/stop/remove/link/unlink/list/streak "
             "(see `idea goal --help`)",
         )
     return GOAL_COMMANDS[args.goal_command](args)

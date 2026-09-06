@@ -446,6 +446,45 @@ def test_unlink_goals_from_idea(conn):
     assert refreshed["idea_id"] is None
 
 
+def test_link_goal_sets_idea_id(conn):
+    goal = dbutil.create_goal(conn, "walk 10000 steps")  # no idea yet
+    idea_id = dbutil.add_idea("run every day")
+
+    linked = dbutil.link_goal(conn, goal["id"], idea_id)
+    assert linked["idea_id"] == idea_id
+
+
+def test_link_goal_can_change_an_existing_link(conn):
+    idea_a = dbutil.add_idea("idea a")
+    idea_b = dbutil.add_idea("idea b")
+    goal = dbutil.create_goal(conn, "x", idea_id=idea_a)
+
+    linked = dbutil.link_goal(conn, goal["id"], idea_b)
+    assert linked["idea_id"] == idea_b
+
+
+def test_link_goal_missing_goal_returns_none(conn):
+    idea_id = dbutil.add_idea("x")
+    assert dbutil.link_goal(conn, 9999, idea_id) is None
+
+
+def test_link_goal_missing_idea_returns_none(conn):
+    goal = dbutil.create_goal(conn, "x")
+    assert dbutil.link_goal(conn, goal["id"], 9999) is None
+
+
+def test_unlink_goal_clears_idea_id(conn):
+    idea_id = dbutil.add_idea("run every day")
+    goal = dbutil.create_goal(conn, "x", idea_id=idea_id)
+
+    unlinked = dbutil.unlink_goal(conn, goal["id"])
+    assert unlinked["idea_id"] is None
+
+
+def test_unlink_goal_missing_returns_none(conn):
+    assert dbutil.unlink_goal(conn, 9999) is None
+
+
 def test_compute_streak_counts_consecutive_complete_days(conn):
     goal_id = _insert_recurring_goal(conn, "walk 10000 steps", "2026-09-01")
     for date in ["2026-09-01", "2026-09-02", "2026-09-03"]:

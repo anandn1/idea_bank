@@ -37,13 +37,24 @@ frontend framework, no external network calls.
 
 ## Rules that must not be broken
 
-1. **CLI/GUI equivalence.** Anything the GUI can do, the CLI can do, and
-   vice versa — both ultimately call the same `dbutil.py` operations, and
-   the JSON API mirrors the CLI's `--json` output shape. The one exception
-   is display-only GUI features with no data behind them (the theme
-   toggle, the pop-out window, the desktop launcher) — those have no CLI
-   equivalent by design. When you add a capability to one surface, add it
-   to the other in the same change; don't leave it as a follow-up.
+1. **CLI/GUI equivalence, with two named exceptions.** Anything the GUI can
+   do to an *existing* idea or goal (move, edit, complete, delete), the CLI
+   can do, and vice versa — both ultimately call the same `dbutil.py`
+   operations, and the JSON API mirrors the CLI's `--json` output shape.
+   Two things break that symmetry on purpose, in opposite directions:
+   - **Display-only GUI features have no CLI equivalent** (the theme
+     toggle, the smart-default-date cutoff, the pop-out window, the desktop
+     launcher) — there's no data behind them to script against.
+   - **Capturing a new idea and linking a goal to an idea are CLI-only**
+     (`idea "text"`, `idea goal link`/`unlink`) — the GUI has no input for
+     either. This was a deliberate choice, not an oversight: the CLI (and
+     any agent using it) is where new content and connections enter the
+     system; the GUI is for browsing and managing what already exists. A
+     goal still *shows* its linked idea in the GUI (read-only), it just
+     can't be set there.
+   When you add a capability to one surface, add it to the other in the
+   same change *unless* it falls into one of these two named exceptions —
+   don't invent a third one without updating this file.
 2. **`~/ideas/` is read-only, forever.** It's the old system this one
    replaced. Nothing here may write to, move, or delete anything under
    it — `migrate.py` only ever opens `inbox.md` for reading. If you touch

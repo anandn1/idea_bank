@@ -7,7 +7,6 @@ let focusId = null; // the keyboard "cursor" position
 let selectedIds = new Set(); // ids batch actions apply to (always includes focusId)
 let visualAnchorId = null; // non-null while range-select ("visual") mode is active
 let editingId = null; // id of the card currently being text-edited, if any
-let captureTargetStatus = "inbox";
 
 // A goal is its own thing (own text, optionally linked to an idea) --
 // completion is always self-reported by the user in the goals panel, never
@@ -15,8 +14,6 @@ let captureTargetStatus = "inbox";
 let todaysGoals = [];
 let streakInfo = { streak: 0, longest: 0, today_complete: false, today_done: 0, today_total: 0, xp: 0 };
 
-const captureForm = document.getElementById("capture-form");
-const captureInput = document.getElementById("capture-input");
 const modeIndicator = document.getElementById("mode-indicator");
 
 // ---- theme: dark / light / system, cycled by the top-bar toggle and
@@ -287,7 +284,6 @@ async function fetchIdeas() {
   if (focusId === null && flatOrder.length > 0) {
     selectCard(flatOrder[0]);
   }
-  populateGoalIdeaSelect(); // keeps the goal-add form's idea-link dropdown in sync
 }
 
 // ---- goals screen: its own full screen, not a side panel -- see
@@ -296,7 +292,6 @@ async function fetchIdeas() {
 const goalsBadge = document.getElementById("goals-badge");
 const goalAddForm = document.getElementById("goal-add-form");
 const goalAddText = document.getElementById("goal-add-text");
-const goalAddIdea = document.getElementById("goal-add-idea");
 const goalListEl = document.getElementById("goal-list");
 const goalWeekdayPills = document.querySelectorAll(".goal-weekday-pill");
 const goalAddDate = document.getElementById("goal-add-date");
@@ -387,18 +382,6 @@ goalDateCutoffHourInput.addEventListener("change", saveGoalDateSettings);
 function renderGoalsBadge() {
   goalsBadge.textContent = `${streakInfo.today_done}/${streakInfo.today_total}`;
   goalsBadge.classList.toggle("complete", streakInfo.today_complete);
-}
-
-function populateGoalIdeaSelect() {
-  const previous = goalAddIdea.value;
-  goalAddIdea.innerHTML = '<option value="">no linked idea</option>';
-  for (const idea of ideas) {
-    const opt = document.createElement("option");
-    opt.value = idea.id;
-    opt.textContent = idea.text.length <= 40 ? idea.text : idea.text.slice(0, 37) + "...";
-    goalAddIdea.appendChild(opt);
-  }
-  goalAddIdea.value = previous;
 }
 
 function renderGoalsPanel() {
@@ -523,7 +506,6 @@ goalAddForm.addEventListener("submit", async (e) => {
   const payload = { text };
   if (weekdays.length > 0) payload.weekdays = weekdays;
   else if (goalAddDate.value) payload.target_date = goalAddDate.value;
-  if (goalAddIdea.value) payload.idea_id = Number(goalAddIdea.value);
 
   const res = await fetch("/api/goals", {
     method: "POST",
@@ -536,7 +518,6 @@ goalAddForm.addEventListener("submit", async (e) => {
   selectedGoalWeekdays.clear();
   goalWeekdayPills.forEach((p) => p.classList.remove("selected"));
   goalAddDate.value = "";
-  goalAddIdea.value = "";
   updateGoalAddDateVisibility(); // refills with a fresh smart default for the next add
   await fetchGoalsData();
   goalAddText.focus();
@@ -561,7 +542,6 @@ function showScreen(name) {
     tab.setAttribute("aria-selected", String(active));
   });
   if (name === "goals") {
-    populateGoalIdeaSelect();
     renderGoalsPanel();
     updateGoalAddDateVisibility();
   }
@@ -570,18 +550,6 @@ function showScreen(name) {
 screenTabs.forEach((tab) => {
   tab.addEventListener("click", () => showScreen(tab.dataset.screen));
 });
-
-async function createIdea(text, status) {
-  const res = await fetch("/api/ideas", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, status }),
-  });
-  if (!res.ok) return;
-  const created = await res.json();
-  ideas.unshift(created);
-  render();
-}
 
 async function patchIdea(id, payload) {
   const res = await fetch(`/api/ideas/${id}`, {
@@ -924,32 +892,7 @@ document.getElementById("modal-delete").addEventListener("click", async () => {
   }
 });
 
-// ---- capture ----
-
-function setCaptureTarget(status) {
-  captureTargetStatus = status;
-  document.querySelectorAll(".target-pill").forEach((btn) => {
-    btn.classList.toggle("selected", btn.dataset.status === status);
-  });
-}
-
-document.querySelectorAll(".target-pill").forEach((btn) => {
-  btn.addEventListener("click", () => setCaptureTarget(btn.dataset.status));
-});
-
-captureForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const text = captureInput.value.trim();
-  if (!text) return;
-  captureInput.value = "";
-  createIdea(text, captureTargetStatus);
-  setCaptureTarget("inbox"); // reset for the next capture, like the CLI's per-call default
-  captureInput.focus();
-});
-
 // ---- keyboard ----
-
-const ALT_STATUS_KEYS = { i: "inbox", a: "active", q: "queued", h: "horizon", f: "frontier", x: "archive" };
 
 document.addEventListener("keydown", (e) => {
   if (!modalBackdrop.hidden) {
@@ -965,13 +908,6 @@ document.addEventListener("keydown", (e) => {
 
   if (inTextField) {
     if (e.key === "Escape") document.activeElement.blur();
-    if (e.altKey && document.activeElement === captureInput) {
-      const status = ALT_STATUS_KEYS[e.key.toLowerCase()];
-      if (status) {
-        e.preventDefault();
-        setCaptureTarget(status);
-      }
-    }
     return;
   }
 
@@ -1026,10 +962,6 @@ document.addEventListener("keydown", (e) => {
       break;
     case "Escape":
       if (visualAnchorId !== null) exitVisualMode();
-      break;
-    case "/":
-      e.preventDefault();
-      captureInput.focus();
       break;
   }
 });

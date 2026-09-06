@@ -454,6 +454,41 @@ def test_goal_remove_missing_fails(run_cli):
     assert result.returncode == 1
 
 
+def test_goal_link_sets_idea_id(run_cli):
+    goal = parse(run_cli("goal", "add", "walk 10000 steps", "--json"))  # no idea yet
+    idea = parse(run_cli("run every day", "--json"))
+    result = run_cli("goal", "link", str(goal["id"]), str(idea["id"]), "--json")
+    assert result.returncode == 0
+    assert parse(result)["idea_id"] == idea["id"]
+
+
+def test_goal_link_missing_goal_fails(run_cli):
+    idea = parse(run_cli("x", "--json"))
+    result = run_cli("goal", "link", "9999", str(idea["id"]), "--json")
+    assert result.returncode == 1
+
+
+def test_goal_link_missing_idea_fails(run_cli):
+    goal = parse(run_cli("goal", "add", "x", "--json"))
+    result = run_cli("goal", "link", str(goal["id"]), "9999", "--json")
+    assert result.returncode == 1
+
+
+def test_goal_unlink_clears_idea_id(run_cli):
+    idea = parse(run_cli("run every day", "--json"))
+    goal = parse(
+        run_cli("goal", "add", "walk 10000 steps", "--idea", str(idea["id"]), "--json")
+    )
+    result = run_cli("goal", "unlink", str(goal["id"]), "--json")
+    assert result.returncode == 0
+    assert parse(result)["idea_id"] is None
+
+
+def test_goal_unlink_missing_fails(run_cli):
+    result = run_cli("goal", "unlink", "9999", "--json")
+    assert result.returncode == 1
+
+
 def test_goal_streak_json_shape(run_cli):
     result = run_cli("goal", "streak", "--json")
     assert result.returncode == 0

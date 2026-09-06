@@ -146,8 +146,15 @@ idea goal done 5                                        mark goal #5 done for to
 idea goal undo 5                                        unmark it
 idea goal stop 5                                        stop a recurring goal (keeps history)
 idea goal remove 5                                      delete a goal and its history
+idea goal link 5 12                                     link an existing goal to idea #12
+idea goal unlink 5                                      remove goal #5's idea link
 idea goal streak                                        current streak and lifetime xp
 ```
+
+A goal doesn't need its idea to exist first -- add the goal, capture the
+idea whenever, then `goal link` them; `goal unlink` removes the link
+without touching either record. Linking is CLI-only, by design -- see
+**GUI** below.
 
 The same thing from the GUI is its own **full screen**, and it's the one you
 land on first — press `g` (or click the `goals` tab in the top bar) to get
@@ -156,13 +163,14 @@ with the day-of-week pills (none selected = one-off, with a date field that
 defaults intelligently: before a configurable cutoff hour it suggests today,
 at/after it suggests tomorrow — matching planning tomorrow's goals before
 closing the laptop for the night; always just a starting point, editable
-either way) and an idea-link dropdown, check items off, `stop`/delete
-existing ones. The top-bar `goals` tab shows a compact `x/y` badge (gold
-once today's goals are all done). The smart-default cutoff (and an option to
-turn it off entirely) is a per-browser preference, not stored in the
-database -- same as the theme toggle, it has no CLI equivalent because
-there's nothing for it to default *for* on the command line, where you
-always say the date explicitly.
+either way), check items off, `stop`/delete existing ones. The top-bar
+`goals` tab shows a compact `x/y` badge (gold once today's goals are all
+done). The smart-default cutoff (and an option to turn it off entirely) is a
+per-browser preference, not stored in the database -- same as the theme
+toggle, it has no CLI equivalent because there's nothing for it to default
+*for* on the command line, where you always say the date explicitly. A goal
+row still *shows* its linked idea (a read-only tag, click to jump to it on
+the board) if one exists -- it just can't be set or changed from the GUI.
 
 Deleting an idea that a goal links to **unlinks** it rather than deleting the
 goal -- the goal and its history are independent of the idea's lifecycle, so
@@ -181,14 +189,14 @@ and `target_date` doesn't apply, same mutual exclusivity as `--weekdays`/
 above) backed by the same SQLite file. `static/app.js` renders two full
 screens -- **goals** (the default) and the **board** (six columns: Inbox,
 Active, Queued, Horizon, Frontier, Archive), switched by a persistent
-top-bar tab pair -- and covers the same ground as the CLI, keyboard-first:
+top-bar tab pair -- for browsing, moving, editing, and completing what
+already exists, keyboard-first. **Capturing a new idea and linking a goal
+to one are deliberately CLI-only** (`idea "text"`, `idea goal link`) — the
+GUI has no input for either, by design: the terminal/agent-facing CLI is
+where new content enters the system, the GUI is where you work with it
+afterward. See **Goals** above and the CLI/GUI equivalence note in
+`AGENTS.md` for the reasoning.
 
-- Typing anywhere outside the capture box is a shortcut; the capture input
-  itself is auto-focused on load and via `/`, and works from either screen.
-- **Capture-to-status**: pills next to the capture input (click, or
-  Alt+I/A/Q/H/F/X while the input is focused) choose where the next capture
-  goes; it resets to Inbox after each capture, matching the CLI's per-call
-  default.
 - `g` / `i` (or the top-bar tabs) switch between the **goals** and **board**
   screens — see **Goals** above.
 - `j` / `k` or `↓` / `↑` move the focus between idea cards (flattened across

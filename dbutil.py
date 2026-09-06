@@ -474,6 +474,27 @@ def unlink_goals_from_idea(conn: sqlite3.Connection, idea_id: int) -> None:
     conn.execute("UPDATE goals SET idea_id = NULL WHERE idea_id = ?", (idea_id,))
 
 
+def link_goal(conn: sqlite3.Connection, goal_id: int, idea_id: int) -> dict | None:
+    """Set (or change) an existing goal's idea link -- for a goal created
+    before its idea existed, or one you've decided should point somewhere
+    else. Returns None if the goal or the idea doesn't exist."""
+    if get_goal(conn, goal_id) is None or get_idea(conn, idea_id) is None:
+        return None
+    conn.execute("UPDATE goals SET idea_id = ? WHERE id = ?", (idea_id, goal_id))
+    conn.commit()
+    return get_goal(conn, goal_id)
+
+
+def unlink_goal(conn: sqlite3.Connection, goal_id: int) -> dict | None:
+    """Remove one goal's idea link (the goal and its history are untouched).
+    Returns None if the goal doesn't exist."""
+    if get_goal(conn, goal_id) is None:
+        return None
+    conn.execute("UPDATE goals SET idea_id = NULL WHERE id = ?", (goal_id,))
+    conn.commit()
+    return get_goal(conn, goal_id)
+
+
 def goals_due_on(conn: sqlite3.Connection, date: str) -> list[dict]:
     """Every goal due on `date`: recurring goals active that day *and*
     scheduled for that weekday, plus one-off goals targeting it exactly.
