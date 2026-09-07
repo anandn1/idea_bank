@@ -12,17 +12,16 @@ need the Flask server or GUI running, and nothing it does touches the
 network. Content is encrypted at rest transparently; you never need to think
 about that when using the CLI, it reads/writes plain text same as always.
 
-**The CLI and the GUI are mostly equivalent, with two deliberate
-exceptions.** Anything doable by clicking around the board (moving,
-editing, completing, deleting, and capturing a new idea) is doable from
-here, and vice versa. But linking a goal to an idea is **CLI-only** — the
-GUI has no input for it, by design, so that can *only* be done here, not
-"also" done here. The reverse also happens: display-only GUI features with
-no data behind them (the theme toggle, the smart-default-date cutoff) have
-no CLI equivalent, because there's nothing to script against. If a user
-describes something they did or want to do in the GUI, there's almost
-always a CLI command for it below — the two exceptions above are the only
-things this CLI can do that the GUI flatly cannot, and vice versa.
+**The CLI and the GUI are fully equivalent, with one deliberate
+exception.** Anything doable by clicking around the board or the goals
+screen (capturing an idea, moving, editing, completing, deleting, linking
+or unlinking a goal to an idea) is doable from here, and vice versa.
+Display-only GUI features with no data behind them (the theme toggle, the
+smart-default-date cutoff) have no CLI equivalent, because there's nothing
+to script against — that's the only exception, and it only ever runs in
+this direction (GUI-only, never CLI-only). If a user describes something
+they did or want to do in the GUI, there's almost always a CLI command for
+it below.
 
 Bare `idea some text` (no subcommand) is shorthand for `idea capture some
 text` — the fastest way to save a thought.
@@ -98,12 +97,9 @@ shorthands. `--weekdays` and `--date` are mutually exclusive on one goal.
 A goal doesn't need its idea to exist first -- add the goal, capture the
 idea whenever, then `goal link` them.
 
-**Linking a goal to an idea is CLI-only** — the GUI has no input for it
-(a goal row there only *shows* its linked idea, read-only), so if a user
-describes wanting to link a goal to an idea "in the app" or asks why they
-can't find a link control in the GUI, this CLI is the way to do it, not a
-GUI gap to work around. Capturing a new idea, on the other hand, works from
-both surfaces now.
+Linking works from the GUI too now (a select on each goal row, plus an
+optional one at add-time) — this CLI command is just the scriptable/agent
+path to the same `dbutil.link_goal`/`unlink_goal` operations.
 
 Streak math: an unfinished *today* doesn't break the streak (it's just not
 counted yet), and a day with nothing due at all is skipped rather than

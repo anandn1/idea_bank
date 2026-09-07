@@ -549,6 +549,25 @@ body {
   display: none;
 }
 
+.goal-add-idea-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.goal-add-row select {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 12px;
+  padding: 5px 6px;
+  border-radius: 3px;
+}
+
 .goal-date-settings {
   display: flex;
   flex-wrap: wrap;
@@ -650,10 +669,38 @@ body {
   padding: 1px 5px;
 }
 
-.goal-tag.idea-link {
+.goal-row-idea {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.goal-row-idea-select {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 1px 3px;
+  max-width: 140px;
+}
+
+.goal-row-idea-select.linked {
   color: var(--teal);
   border-color: var(--teal);
+}
+
+.goal-idea-jump {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--teal);
+  background: transparent;
+  border: 1px solid var(--teal);
+  border-radius: 2px;
+  padding: 0px 4px;
   cursor: pointer;
+  line-height: 1.4;
 }
 
 .goal-row-actions {

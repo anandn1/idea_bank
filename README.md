@@ -153,8 +153,7 @@ idea goal streak                                        current streak and lifet
 
 A goal doesn't need its idea to exist first -- add the goal, capture the
 idea whenever (CLI or GUI), then `goal link` them; `goal unlink` removes
-the link without touching either record. Linking itself is CLI-only, by
-design -- see **GUI** below.
+the link without touching either record. Linking works from either surface.
 
 The same thing from the GUI is its own **full screen**, and it's the one you
 land on first — press `g` (or click the `goals` tab in the top bar) to get
@@ -163,14 +162,16 @@ with the day-of-week pills (none selected = one-off, with a date field that
 defaults intelligently: before a configurable cutoff hour it suggests today,
 at/after it suggests tomorrow — matching planning tomorrow's goals before
 closing the laptop for the night; always just a starting point, editable
-either way), check items off, `stop`/delete existing ones. The top-bar
-`goals` tab shows a compact `x/y` badge (gold once today's goals are all
-done). The smart-default cutoff (and an option to turn it off entirely) is a
+either way) and, optionally, a "link idea" dropdown right there at add-time.
+Check items off, `stop`/delete existing ones. The top-bar `goals` tab shows
+a compact `x/y` badge (gold once today's goals are all done). The
+smart-default cutoff (and an option to turn it off entirely) is a
 per-browser preference, not stored in the database -- same as the theme
 toggle, it has no CLI equivalent because there's nothing for it to default
-*for* on the command line, where you always say the date explicitly. A goal
-row still *shows* its linked idea (a read-only tag, click to jump to it on
-the board) if one exists -- it just can't be set or changed from the GUI.
+*for* on the command line, where you always say the date explicitly. Every
+goal row also carries its own idea-link select (blank = unlinked; picking
+an idea links it, clearing it back to blank unlinks it) plus a small `↗`
+button to jump to the linked idea on the board, when one's set.
 
 Deleting an idea that a goal links to **unlinks** it rather than deleting the
 goal -- the goal and its history are independent of the idea's lifecycle, so
@@ -182,7 +183,8 @@ JSON API: `GET /api/goals?date=` (today's due goals, default today),
 (`weekdays` is Monday=0..Sunday=6; a non-empty list makes the goal recurring
 and `target_date` doesn't apply, same mutual exclusivity as `--weekdays`/
 `--date` on the CLI), `PATCH /api/goals/<id> {"completed": true/false, "date": ...}`,
-`POST /api/goals/<id>/stop`, `DELETE /api/goals/<id>`, `GET /api/goals/streak`.
+`POST /api/goals/<id>/stop`, `POST /api/goals/<id>/link {"idea_id": ...}`,
+`POST /api/goals/<id>/unlink`, `DELETE /api/goals/<id>`, `GET /api/goals/streak`.
 
 **GUI** — `server.py` serves `static/index.html` and a small JSON API
 (`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`, plus the goals routes
@@ -193,10 +195,10 @@ top-bar tab pair -- for browsing, moving, editing, and completing what
 already exists, keyboard-first. The board screen opens with a labeled
 "New idea" box (a text field, a status pill group defaulting to `inbox`,
 and an "Add idea" button) above the columns, so capturing works from either
-surface. **Linking a goal to an idea is deliberately CLI-only**
-(`idea goal link`) — the GUI has no input for it, by design: a goal row
-there only shows its linked idea, read-only. See **Goals** above and the
-CLI/GUI equivalence note in `AGENTS.md` for the reasoning.
+surface. See **Goals** above for how linking works from the GUI (an
+at-add-time dropdown, plus a per-row select) and the CLI/GUI equivalence
+note in `AGENTS.md` for the reasoning behind what little still doesn't
+carry over between the two surfaces.
 
 - `g` / `i` (or the top-bar tabs) switch between the **goals** and **board**
   screens — see **Goals** above.

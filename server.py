@@ -182,6 +182,29 @@ def remove_goal_route(goal_id):
         return "", 204
 
 
+@app.post("/api/goals/<int:goal_id>/link")
+def link_goal_route(goal_id):
+    payload = request.get_json(silent=True) or {}
+    idea_id = payload.get("idea_id")
+    if not isinstance(idea_id, int) or isinstance(idea_id, bool):
+        return jsonify({"error": "idea_id (integer) is required"}), 400
+
+    with dbutil.connection() as conn:
+        goal = dbutil.link_goal(conn, goal_id, idea_id)
+        if goal is None:
+            return jsonify({"error": "no goal or idea with that id"}), 404
+        return jsonify(goal)
+
+
+@app.post("/api/goals/<int:goal_id>/unlink")
+def unlink_goal_route(goal_id):
+    with dbutil.connection() as conn:
+        goal = dbutil.unlink_goal(conn, goal_id)
+        if goal is None:
+            return jsonify({"error": "no goal with that id"}), 404
+        return jsonify(goal)
+
+
 @app.get("/api/goals/streak")
 def goal_streak():
     with dbutil.connection() as conn:

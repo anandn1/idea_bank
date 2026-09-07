@@ -284,6 +284,21 @@ async function fetchIdeas() {
   if (focusId === null && flatOrder.length > 0) {
     selectCard(flatOrder[0]);
   }
+  populateIdeaSelect(goalAddIdea, goalAddIdea.value);
+  if (currentScreen === "goals") renderGoalsPanel(); // refresh goal rows' idea-link selects
+}
+
+// Shared by the goal-add form's idea-link select and each goal row's --
+// keeps the truncation and "no linked idea" placeholder in one place.
+function populateIdeaSelect(select, currentValue) {
+  select.innerHTML = '<option value="">no linked idea</option>';
+  for (const idea of ideas) {
+    const opt = document.createElement("option");
+    opt.value = idea.id;
+    opt.textContent = idea.text.length <= 40 ? idea.text : idea.text.slice(0, 37) + "...";
+    select.appendChild(opt);
+  }
+  select.value = currentValue ?? "";
 }
 
 // ---- goals screen: its own full screen, not a side panel -- see
@@ -292,6 +307,7 @@ async function fetchIdeas() {
 const goalsBadge = document.getElementById("goals-badge");
 const goalAddForm = document.getElementById("goal-add-form");
 const goalAddText = document.getElementById("goal-add-text");
+const goalAddIdea = document.getElementById("goal-add-idea");
 const goalListEl = document.getElementById("goal-list");
 const goalWeekdayPills = document.querySelectorAll(".goal-weekday-pill");
 const goalAddDate = document.getElementById("goal-add-date");
@@ -443,17 +459,34 @@ function buildGoalRow(goal) {
   meta.appendChild(recurTag);
 
   const linkedIdea = goal.idea_id ? ideas.find((i) => i.id === goal.idea_id) : null;
+
+  const ideaWrap = document.createElement("div");
+  ideaWrap.className = "goal-row-idea";
+
+  const ideaSelect = document.createElement("select");
+  ideaSelect.className = "goal-row-idea-select";
+  populateIdeaSelect(ideaSelect, goal.idea_id ?? "");
+  ideaSelect.addEventListener("change", () => {
+    const value = ideaSelect.value;
+    if (value) linkGoalToIdea(goal.id, Number(value));
+    else unlinkGoalFromIdea(goal.id);
+  });
+  ideaWrap.appendChild(ideaSelect);
+
   if (linkedIdea) {
-    const ideaTag = document.createElement("span");
-    ideaTag.className = "goal-tag idea-link";
-    ideaTag.textContent = linkedIdea.text.length <= 24 ? linkedIdea.text : linkedIdea.text.slice(0, 21) + "...";
-    ideaTag.title = "jump to this idea on the board";
-    ideaTag.addEventListener("click", () => {
+    ideaSelect.classList.add("linked");
+    const jumpBtn = document.createElement("button");
+    jumpBtn.type = "button";
+    jumpBtn.className = "goal-idea-jump";
+    jumpBtn.textContent = "↗";
+    jumpBtn.title = "jump to this idea on the board";
+    jumpBtn.addEventListener("click", () => {
       showScreen("board");
       selectCard(linkedIdea.id);
     });
-    meta.appendChild(ideaTag);
+    ideaWrap.appendChild(jumpBtn);
   }
+  meta.appendChild(ideaWrap);
   body.appendChild(meta);
 
   const actions = document.createElement("div");
@@ -499,6 +532,20 @@ async function removeGoal(goalId) {
   await fetchGoalsData();
 }
 
+async function linkGoalToIdea(goalId, ideaId) {
+  await fetch(`/api/goals/${goalId}/link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idea_id: ideaId }),
+  });
+  await fetchGoalsData();
+}
+
+async function unlinkGoalFromIdea(goalId) {
+  await fetch(`/api/goals/${goalId}/unlink`, { method: "POST" });
+  await fetchGoalsData();
+}
+
 goalAddForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const text = goalAddText.value.trim();
@@ -507,6 +554,7 @@ goalAddForm.addEventListener("submit", async (e) => {
   const payload = { text };
   if (weekdays.length > 0) payload.weekdays = weekdays;
   else if (goalAddDate.value) payload.target_date = goalAddDate.value;
+  if (goalAddIdea.value) payload.idea_id = Number(goalAddIdea.value);
 
   const res = await fetch("/api/goals", {
     method: "POST",
@@ -519,6 +567,7 @@ goalAddForm.addEventListener("submit", async (e) => {
   selectedGoalWeekdays.clear();
   goalWeekdayPills.forEach((p) => p.classList.remove("selected"));
   goalAddDate.value = "";
+  goalAddIdea.value = "";
   updateGoalAddDateVisibility(); // refills with a fresh smart default for the next add
   await fetchGoalsData();
   goalAddText.focus();
@@ -543,6 +592,7 @@ function showScreen(name) {
     tab.setAttribute("aria-selected", String(active));
   });
   if (name === "goals") {
+    populateIdeaSelect(goalAddIdea, goalAddIdea.value);
     renderGoalsPanel();
     updateGoalAddDateVisibility();
   }

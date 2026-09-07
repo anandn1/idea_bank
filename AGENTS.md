@@ -37,25 +37,19 @@ frontend framework, no external network calls.
 
 ## Rules that must not be broken
 
-1. **CLI/GUI equivalence, with two named exceptions.** Anything the GUI can
-   do to an *existing* idea or goal (move, edit, complete, delete), the CLI
-   can do, and vice versa — both ultimately call the same `dbutil.py`
-   operations, and the JSON API mirrors the CLI's `--json` output shape.
-   Capturing a new idea is on both surfaces (`idea "text"` on the CLI, the
-   labeled "New idea" form on the board screen in the GUI). Two things
-   still break the symmetry on purpose, in opposite directions:
-   - **Display-only GUI features have no CLI equivalent** (the theme
-     toggle, the smart-default-date cutoff, the pop-out window, the desktop
-     launcher) — there's no data behind them to script against.
-   - **Linking a goal to an idea is CLI-only** (`idea goal link`/`unlink`)
-     — the GUI has no input for it. This was a deliberate choice, not an
-     oversight: a goal doesn't need its idea to exist yet, and the CLI (or
-     an agent using it) is where that connection gets made after the fact.
-     A goal still *shows* its linked idea in the GUI (read-only), it just
-     can't be set there.
-   When you add a capability to one surface, add it to the other in the
-   same change *unless* it falls into one of these two named exceptions —
-   don't invent a third one without updating this file.
+1. **CLI/GUI equivalence, with one named exception.** Anything the GUI can
+   do to an idea or goal — capture, move, edit, complete, delete, link/unlink
+   a goal to an idea — the CLI can do, and vice versa. Both ultimately call
+   the same `dbutil.py` operations, and the JSON API mirrors the CLI's
+   `--json` output shape. **Display-only GUI features have no CLI
+   equivalent** (the theme toggle, the smart-default-date cutoff, the
+   pop-out window, the desktop launcher) — there's no data behind them to
+   script against. That's the only exception. When you add a capability to
+   one surface, add it to the other in the same change unless it's purely
+   cosmetic like the ones above — don't invent a new data-carrying
+   exception without updating this file and getting it past review; the
+   project's history already has one case (idea capture, briefly CLI-only)
+   where "exception" turned out to just be unfinished work.
 2. **`~/ideas/` is read-only, forever.** It's the old system this one
    replaced. Nothing here may write to, move, or delete anything under
    it — `migrate.py` only ever opens `inbox.md` for reading. If you touch
