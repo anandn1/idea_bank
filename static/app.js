@@ -329,8 +329,9 @@ function loadGoalDateSettings() {
   try {
     const storedEnabled = localStorage.getItem(GOAL_DATE_SMART_DEFAULT_KEY);
     if (storedEnabled !== null) smartDefault = storedEnabled !== "off";
-    const storedCutoff = Number(localStorage.getItem(GOAL_DATE_CUTOFF_HOUR_KEY));
-    if (Number.isInteger(storedCutoff) && storedCutoff >= 0 && storedCutoff <= 23) {
+    const storedCutoffRaw = localStorage.getItem(GOAL_DATE_CUTOFF_HOUR_KEY);
+    const storedCutoff = Number(storedCutoffRaw);
+    if (storedCutoffRaw !== null && Number.isInteger(storedCutoff) && storedCutoff >= 0 && storedCutoff <= 23) {
       cutoffHour = storedCutoff;
     }
   } catch {
