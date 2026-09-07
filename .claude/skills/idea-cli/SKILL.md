@@ -14,15 +14,15 @@ about that when using the CLI, it reads/writes plain text same as always.
 
 **The CLI and the GUI are mostly equivalent, with two deliberate
 exceptions.** Anything doable by clicking around the board (moving,
-editing, completing, deleting) is doable from here, and vice versa. But
-capturing a *new* idea and linking a goal to one are **CLI-only** — the GUI
-has no input for either, by design, so those two things can *only* be done
-here, not "also" done here. The reverse also happens: display-only GUI
-features with no data behind them (the theme toggle, the smart-default-date
-cutoff) have no CLI equivalent, because there's nothing to script against.
-If a user describes something they did or want to do in the GUI, there's
-almost always a CLI command for it below — the two exceptions above are the
-only things this CLI can do that the GUI flatly cannot, and vice versa.
+editing, completing, deleting, and capturing a new idea) is doable from
+here, and vice versa. But linking a goal to an idea is **CLI-only** — the
+GUI has no input for it, by design, so that can *only* be done here, not
+"also" done here. The reverse also happens: display-only GUI features with
+no data behind them (the theme toggle, the smart-default-date cutoff) have
+no CLI equivalent, because there's nothing to script against. If a user
+describes something they did or want to do in the GUI, there's almost
+always a CLI command for it below — the two exceptions above are the only
+things this CLI can do that the GUI flatly cannot, and vice versa.
 
 Bare `idea some text` (no subcommand) is shorthand for `idea capture some
 text` — the fastest way to save a thought.
@@ -98,11 +98,12 @@ shorthands. `--weekdays` and `--date` are mutually exclusive on one goal.
 A goal doesn't need its idea to exist first -- add the goal, capture the
 idea whenever, then `goal link` them.
 
-**Capturing an idea and linking a goal to one are CLI-only** — the GUI has
-no input for either (it only browses/manages what already exists), so if a
-user describes wanting to do this "in the app" or asks why they can't find
-an idea box or a link control in the GUI, this CLI is the way to do it, not
-a GUI gap to work around.
+**Linking a goal to an idea is CLI-only** — the GUI has no input for it
+(a goal row there only *shows* its linked idea, read-only), so if a user
+describes wanting to link a goal to an idea "in the app" or asks why they
+can't find a link control in the GUI, this CLI is the way to do it, not a
+GUI gap to work around. Capturing a new idea, on the other hand, works from
+both surfaces now.
 
 Streak math: an unfinished *today* doesn't break the streak (it's just not
 counted yet), and a day with nothing due at all is skipped rather than

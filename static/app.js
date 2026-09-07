@@ -552,6 +552,45 @@ screenTabs.forEach((tab) => {
   tab.addEventListener("click", () => showScreen(tab.dataset.screen));
 });
 
+// ---- idea-add form: a labeled GUI box on the board screen, not a bare
+// command-prompt input. Status pills are scoped to this form's own
+// container (never a bare document-wide ".target-pill" query) so they
+// can't collide with any other pill group on the page -- see the
+// goal-weekday-pill bug this same mistake caused earlier. ----
+
+const ideaAddForm = document.getElementById("idea-add-form");
+const ideaAddText = document.getElementById("idea-add-text");
+const ideaAddStatusPills = document.querySelectorAll("#idea-add-status .idea-status-pill");
+let ideaAddStatus = "inbox";
+
+ideaAddStatusPills.forEach((pill) => {
+  pill.addEventListener("click", () => {
+    ideaAddStatus = pill.dataset.status;
+    ideaAddStatusPills.forEach((p) => p.classList.toggle("selected", p === pill));
+  });
+});
+
+async function createIdea(text, status) {
+  const res = await fetch("/api/ideas", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, status }),
+  });
+  if (!res.ok) return;
+  const created = await res.json();
+  ideas.unshift(created);
+  render();
+}
+
+ideaAddForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = ideaAddText.value.trim();
+  if (!text) return;
+  ideaAddText.value = "";
+  createIdea(text, ideaAddStatus);
+  ideaAddText.focus();
+});
+
 async function patchIdea(id, payload) {
   const res = await fetch(`/api/ideas/${id}`, {
     method: "PATCH",

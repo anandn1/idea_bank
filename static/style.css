@@ -237,6 +237,69 @@ body {
   display: none;
 }
 
+/* ---- idea-add box: a labeled GUI form (not a bare command-prompt input)
+   sitting above the board, since capturing a new idea is a first-class GUI
+   action, not just a CLI one. ---- */
+
+.idea-add-box {
+  flex-shrink: 0;
+  padding: 14px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.idea-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.idea-add-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+#idea-add-text {
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  padding: 7px 9px;
+  border-radius: 3px;
+  outline: none;
+}
+
+#idea-add-text:focus {
+  border-color: var(--gold);
+}
+
+.idea-add-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.idea-add-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.idea-add-submit {
+  background: transparent;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 /* ---- board ---- */
 
 .board {

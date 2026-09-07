@@ -41,16 +41,17 @@ frontend framework, no external network calls.
    do to an *existing* idea or goal (move, edit, complete, delete), the CLI
    can do, and vice versa — both ultimately call the same `dbutil.py`
    operations, and the JSON API mirrors the CLI's `--json` output shape.
-   Two things break that symmetry on purpose, in opposite directions:
+   Capturing a new idea is on both surfaces (`idea "text"` on the CLI, the
+   labeled "New idea" form on the board screen in the GUI). Two things
+   still break the symmetry on purpose, in opposite directions:
    - **Display-only GUI features have no CLI equivalent** (the theme
      toggle, the smart-default-date cutoff, the pop-out window, the desktop
      launcher) — there's no data behind them to script against.
-   - **Capturing a new idea and linking a goal to an idea are CLI-only**
-     (`idea "text"`, `idea goal link`/`unlink`) — the GUI has no input for
-     either. This was a deliberate choice, not an oversight: the CLI (and
-     any agent using it) is where new content and connections enter the
-     system; the GUI is for browsing and managing what already exists. A
-     goal still *shows* its linked idea in the GUI (read-only), it just
+   - **Linking a goal to an idea is CLI-only** (`idea goal link`/`unlink`)
+     — the GUI has no input for it. This was a deliberate choice, not an
+     oversight: a goal doesn't need its idea to exist yet, and the CLI (or
+     an agent using it) is where that connection gets made after the fact.
+     A goal still *shows* its linked idea in the GUI (read-only), it just
      can't be set there.
    When you add a capability to one surface, add it to the other in the
    same change *unless* it falls into one of these two named exceptions —

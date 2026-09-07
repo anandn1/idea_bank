@@ -66,6 +66,24 @@
   </section>
 
   <section class="screen board-screen" id="board-screen" hidden>
+    <div class="idea-add-box">
+      <form class="idea-add-form" id="idea-add-form" autocomplete="off">
+        <label class="idea-add-label" for="idea-add-text">New idea</label>
+        <input type="text" id="idea-add-text" placeholder="e.g. build a phone version of this app">
+        <div class="idea-add-status-row">
+          <label class="idea-add-label" id="idea-add-status-label">Status</label>
+          <div class="idea-add-status" id="idea-add-status" role="group" aria-labelledby="idea-add-status-label">
+            <button type="button" class="target-pill idea-status-pill selected" data-status="inbox">inbox</button>
+            <button type="button" class="target-pill idea-status-pill" data-status="active">active</button>
+            <button type="button" class="target-pill idea-status-pill" data-status="queued">queued</button>
+            <button type="button" class="target-pill idea-status-pill" data-status="horizon">horizon</button>
+            <button type="button" class="target-pill idea-status-pill" data-status="frontier">frontier</button>
+            <button type="button" class="target-pill idea-status-pill" data-status="archive">archive</button>
+          </div>
+          <button type="submit" class="idea-add-submit">Add idea</button>
+        </div>
+      </form>
+    </div>
     <div class="board" id="board">
       <section class="column" data-status="inbox">
         <h2 class="column-title">Inbox</h2>

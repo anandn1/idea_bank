@@ -152,9 +152,9 @@ idea goal streak                                        current streak and lifet
 ```
 
 A goal doesn't need its idea to exist first -- add the goal, capture the
-idea whenever, then `goal link` them; `goal unlink` removes the link
-without touching either record. Linking is CLI-only, by design -- see
-**GUI** below.
+idea whenever (CLI or GUI), then `goal link` them; `goal unlink` removes
+the link without touching either record. Linking itself is CLI-only, by
+design -- see **GUI** below.
 
 The same thing from the GUI is its own **full screen**, and it's the one you
 land on first — press `g` (or click the `goals` tab in the top bar) to get
@@ -190,12 +190,13 @@ above) backed by the same SQLite file. `static/app.js` renders two full
 screens -- **goals** (the default) and the **board** (six columns: Inbox,
 Active, Queued, Horizon, Frontier, Archive), switched by a persistent
 top-bar tab pair -- for browsing, moving, editing, and completing what
-already exists, keyboard-first. **Capturing a new idea and linking a goal
-to one are deliberately CLI-only** (`idea "text"`, `idea goal link`) — the
-GUI has no input for either, by design: the terminal/agent-facing CLI is
-where new content enters the system, the GUI is where you work with it
-afterward. See **Goals** above and the CLI/GUI equivalence note in
-`AGENTS.md` for the reasoning.
+already exists, keyboard-first. The board screen opens with a labeled
+"New idea" box (a text field, a status pill group defaulting to `inbox`,
+and an "Add idea" button) above the columns, so capturing works from either
+surface. **Linking a goal to an idea is deliberately CLI-only**
+(`idea goal link`) — the GUI has no input for it, by design: a goal row
+there only shows its linked idea, read-only. See **Goals** above and the
+CLI/GUI equivalence note in `AGENTS.md` for the reasoning.
 
 - `g` / `i` (or the top-bar tabs) switch between the **goals** and **board**
   screens — see **Goals** above.
