@@ -17,8 +17,75 @@ const modalEl = document.querySelector(".modal");
 const statusPillsEl = document.getElementById("modal-status-pills");
 const textEl = document.getElementById("modal-text");
 const fieldsEl = document.getElementById("modal-fields");
+const goalsEl = document.getElementById("modal-goals");
 const notesEl = document.getElementById("modal-notes");
 const metaEl = document.getElementById("modal-meta");
+
+// mirrors formatWeekdays in app.js -- necessarily duplicated, see this
+// file's own header comment on why nothing is shared with app.js
+const WEEKDAY_DISPLAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function formatWeekdays(weekdays) {
+  if (!weekdays) return "one-off";
+  const days = new Set(weekdays);
+  if (days.size === 7) return "daily";
+  if (days.size === 5 && [0, 1, 2, 3, 4].every((d) => days.has(d))) return "weekdays";
+  if (days.size === 2 && days.has(5) && days.has(6)) return "weekends";
+  return [...days].sort((a, b) => a - b).map((d) => WEEKDAY_DISPLAY[d]).join("/");
+}
+
+function buildGoalGroup(label, goals, completed) {
+  const group = document.createElement("div");
+  group.className = "modal-goal-group";
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "modal-goal-group-label";
+  labelEl.textContent = label;
+  group.appendChild(labelEl);
+
+  for (const goal of goals) {
+    const row = document.createElement("div");
+    row.className = "modal-goal-row" + (completed ? " completed" : "");
+
+    const text = document.createElement("span");
+    text.className = "modal-goal-text";
+    text.textContent = goal.text;
+    row.appendChild(text);
+
+    const tag = document.createElement("span");
+    tag.className = "goal-tag";
+    tag.textContent = formatWeekdays(goal.weekdays);
+    row.appendChild(tag);
+
+    if (completed && goal.times_completed) {
+      const count = document.createElement("span");
+      count.className = "goal-tag";
+      count.textContent = `${goal.times_completed}x`;
+      row.appendChild(count);
+    }
+
+    group.appendChild(row);
+  }
+  return group;
+}
+
+async function loadGoals() {
+  const res = await fetch(`/api/ideas/${ideaId}/goals`);
+  if (!res.ok) return;
+  const goals = await res.json();
+  goalsEl.innerHTML = "";
+  if (goals.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "modal-goals-empty";
+    hint.textContent = "no goals linked to this idea yet";
+    goalsEl.appendChild(hint);
+    return;
+  }
+  const current = goals.filter((g) => !g.completed);
+  const completed = goals.filter((g) => g.completed);
+  if (current.length) goalsEl.appendChild(buildGoalGroup("current", current, false));
+  if (completed.length) goalsEl.appendChild(buildGoalGroup("completed", completed, true));
+}
 
 function showNotice(message) {
   modalEl.innerHTML = `<div class="standalone-notice">${message}</div>`;
@@ -44,6 +111,7 @@ async function load() {
     notes: idea.notes || "",
   };
   render(idea);
+  loadGoals();
   textEl.focus();
 }
 
@@ -75,6 +143,7 @@ function renderFields() {
     row.className = "field-row";
 
     const keyInput = document.createElement("input");
+    keyInput.className = "field-key";
     keyInput.type = "text";
     keyInput.placeholder = "key";
     keyInput.value = key;
@@ -82,7 +151,12 @@ function renderFields() {
       pending.fields[index][0] = keyInput.value;
     });
 
+    const sep = document.createElement("span");
+    sep.className = "field-sep";
+    sep.textContent = ":";
+
     const valueInput = document.createElement("input");
+    valueInput.className = "field-value";
     valueInput.type = "text";
     valueInput.placeholder = "value";
     valueInput.value = value;
@@ -100,6 +174,7 @@ function renderFields() {
     });
 
     row.appendChild(keyInput);
+    row.appendChild(sep);
     row.appendChild(valueInput);
     row.appendChild(removeBtn);
     fieldsEl.appendChild(row);

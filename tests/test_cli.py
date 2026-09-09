@@ -128,6 +128,73 @@ def test_show_missing_id_fails(run_cli):
     assert "error" in parse(result)
 
 
+def test_show_includes_linked_goals_current_and_completed(run_cli):
+    idea = parse(run_cli("ship the migration", "--json"))
+    current = parse(
+        run_cli(
+            "goal",
+            "add",
+            "draft it",
+            "--idea",
+            str(idea["id"]),
+            "--date",
+            "2026-09-01",
+            "--json",
+        )
+    )
+    done = parse(
+        run_cli(
+            "goal",
+            "add",
+            "outline it",
+            "--idea",
+            str(idea["id"]),
+            "--date",
+            "2026-08-01",
+            "--json",
+        )
+    )
+    run_cli("goal", "done", str(done["id"]), "--date", "2026-08-01", "--json")
+
+    shown = parse(run_cli("show", str(idea["id"]), "--json"))
+
+    goals_by_id = {g["id"]: g for g in shown["goals"]}
+    assert goals_by_id[current["id"]]["completed"] is False
+    assert goals_by_id[done["id"]]["completed"] is True
+
+
+def test_show_no_linked_goals_is_empty_list(run_cli):
+    idea = parse(run_cli("standalone idea", "--json"))
+    shown = parse(run_cli("show", str(idea["id"]), "--json"))
+    assert shown["goals"] == []
+
+
+def test_show_lists_a_goal_linked_to_this_idea_among_several(run_cli):
+    idea_a = parse(run_cli("idea A", "--json"))
+    idea_b = parse(run_cli("idea B", "--json"))
+    goal = parse(
+        run_cli(
+            "goal",
+            "add",
+            "shared goal",
+            "--idea",
+            str(idea_a["id"]),
+            "--idea",
+            str(idea_b["id"]),
+            "--json",
+        )
+    )
+
+    shown_a = parse(run_cli("show", str(idea_a["id"]), "--json"))
+    shown_b = parse(run_cli("show", str(idea_b["id"]), "--json"))
+
+    assert [g["id"] for g in shown_a["goals"]] == [goal["id"]]
+    assert [g["id"] for g in shown_b["goals"]] == [goal["id"]]
+    assert sorted(shown_a["goals"][0]["idea_ids"]) == sorted(
+        [idea_a["id"], idea_b["id"]]
+    )
+
+
 # ---- move ----
 
 
@@ -304,7 +371,7 @@ def test_goal_add_one_off(run_cli):
     goal = parse(run_cli("goal", "add", "walk 10000 steps", "--json"))
     assert goal["text"] == "walk 10000 steps"
     assert goal["weekdays"] is None
-    assert goal["idea_id"] is None
+    assert goal["idea_ids"] == []
 
 
 def test_goal_add_weekdays_daily(run_cli):
@@ -358,7 +425,33 @@ def test_goal_add_linked_to_idea(run_cli):
     goal = parse(
         run_cli("goal", "add", "walk 10000 steps", "--idea", str(idea["id"]), "--json")
     )
-    assert goal["idea_id"] == idea["id"]
+    assert goal["idea_ids"] == [idea["id"]]
+
+
+def test_goal_add_linked_to_several_ideas(run_cli):
+    idea_a = parse(run_cli("idea A", "--json"))
+    idea_b = parse(run_cli("idea B", "--json"))
+    goal = parse(
+        run_cli(
+            "goal",
+            "add",
+            "shared goal",
+            "--idea",
+            str(idea_a["id"]),
+            "--idea",
+            str(idea_b["id"]),
+            "--json",
+        )
+    )
+    assert sorted(goal["idea_ids"]) == sorted([idea_a["id"], idea_b["id"]])
+
+
+def test_goal_add_linked_to_missing_idea_among_several_fails(run_cli):
+    idea = parse(run_cli("real idea", "--json"))
+    result = run_cli(
+        "goal", "add", "x", "--idea", str(idea["id"]), "--idea", "9999", "--json"
+    )
+    assert result.returncode == 1
 
 
 def test_goal_add_missing_idea_fails(run_cli):
@@ -459,7 +552,16 @@ def test_goal_link_sets_idea_id(run_cli):
     idea = parse(run_cli("run every day", "--json"))
     result = run_cli("goal", "link", str(goal["id"]), str(idea["id"]), "--json")
     assert result.returncode == 0
-    assert parse(result)["idea_id"] == idea["id"]
+    assert parse(result)["idea_ids"] == [idea["id"]]
+
+
+def test_goal_link_adds_a_second_link_without_removing_the_first(run_cli):
+    idea_a = parse(run_cli("idea A", "--json"))
+    idea_b = parse(run_cli("idea B", "--json"))
+    goal = parse(run_cli("goal", "add", "x", "--idea", str(idea_a["id"]), "--json"))
+    result = run_cli("goal", "link", str(goal["id"]), str(idea_b["id"]), "--json")
+    assert result.returncode == 0
+    assert sorted(parse(result)["idea_ids"]) == sorted([idea_a["id"], idea_b["id"]])
 
 
 def test_goal_link_missing_goal_fails(run_cli):
@@ -474,18 +576,39 @@ def test_goal_link_missing_idea_fails(run_cli):
     assert result.returncode == 1
 
 
-def test_goal_unlink_clears_idea_id(run_cli):
+def test_goal_unlink_removes_just_that_idea(run_cli):
     idea = parse(run_cli("run every day", "--json"))
     goal = parse(
         run_cli("goal", "add", "walk 10000 steps", "--idea", str(idea["id"]), "--json")
     )
-    result = run_cli("goal", "unlink", str(goal["id"]), "--json")
+    result = run_cli("goal", "unlink", str(goal["id"]), str(idea["id"]), "--json")
     assert result.returncode == 0
-    assert parse(result)["idea_id"] is None
+    assert parse(result)["idea_ids"] == []
 
 
-def test_goal_unlink_missing_fails(run_cli):
-    result = run_cli("goal", "unlink", "9999", "--json")
+def test_goal_unlink_leaves_other_links_alone(run_cli):
+    idea_a = parse(run_cli("idea A", "--json"))
+    idea_b = parse(run_cli("idea B", "--json"))
+    goal = parse(
+        run_cli(
+            "goal",
+            "add",
+            "x",
+            "--idea",
+            str(idea_a["id"]),
+            "--idea",
+            str(idea_b["id"]),
+            "--json",
+        )
+    )
+    result = run_cli("goal", "unlink", str(goal["id"]), str(idea_a["id"]), "--json")
+    assert result.returncode == 0
+    assert parse(result)["idea_ids"] == [idea_b["id"]]
+
+
+def test_goal_unlink_missing_goal_fails(run_cli):
+    idea = parse(run_cli("x", "--json"))
+    result = run_cli("goal", "unlink", "9999", str(idea["id"]), "--json")
     assert result.returncode == 1
 
 
@@ -518,6 +641,61 @@ def test_goal_no_subcommand_fails(run_cli):
     assert result.returncode == 1
 
 
+def test_goal_history_empty(run_cli):
+    result = run_cli("goal", "history", "--json")
+    assert result.returncode == 0
+    assert parse(result) == []
+
+
+def test_goal_history_includes_completed_one_off(run_cli):
+    goal = parse(
+        run_cli("goal", "add", "draft the proposal", "--date", "2026-08-01", "--json")
+    )
+    run_cli("goal", "done", str(goal["id"]), "--date", "2026-08-01", "--json")
+
+    history = parse(run_cli("goal", "history", "--json"))
+    assert [g["id"] for g in history] == [goal["id"]]
+    assert history[0]["times_completed"] == 1
+
+
+def test_goal_history_excludes_active_recurring_goal(run_cli):
+    goal = parse(run_cli("goal", "add", "walk", "--weekdays", "daily", "--json"))
+    run_cli(
+        "goal", "done", str(goal["id"]), "--json"
+    )  # completing today isn't stopping it
+
+    assert parse(run_cli("goal", "history", "--json")) == []
+
+
+def test_goal_history_includes_stopped_recurring_goal(run_cli):
+    goal = parse(run_cli("goal", "add", "walk", "--weekdays", "daily", "--json"))
+    run_cli("goal", "stop", str(goal["id"]), "--json")
+
+    history = parse(run_cli("goal", "history", "--json"))
+    assert [g["id"] for g in history] == [goal["id"]]
+
+
+def test_goal_history_shows_linked_idea_text(run_cli):
+    idea = parse(run_cli("ship the migration", "--json"))
+    goal = parse(
+        run_cli(
+            "goal",
+            "add",
+            "draft it",
+            "--idea",
+            str(idea["id"]),
+            "--date",
+            "2026-08-01",
+            "--json",
+        )
+    )
+    run_cli("goal", "done", str(goal["id"]), "--date", "2026-08-01", "--json")
+
+    result = run_cli("goal", "history")
+    assert result.returncode == 0
+    assert "ship the migration" in result.stdout
+
+
 def test_delete_idea_unlinks_its_goal_but_keeps_it(run_cli):
     idea = parse(run_cli("run every day", "--json"))
     goal = parse(
@@ -528,7 +706,28 @@ def test_delete_idea_unlinks_its_goal_but_keeps_it(run_cli):
     goals = parse(run_cli("goal", "list", "--json"))["goals"]
     assert len(goals) == 1
     assert goals[0]["id"] == goal["id"]
-    assert goals[0]["idea_id"] is None
+    assert goals[0]["idea_ids"] == []
+
+
+def test_delete_idea_only_removes_that_ones_link(run_cli):
+    idea_a = parse(run_cli("idea A", "--json"))
+    idea_b = parse(run_cli("idea B", "--json"))
+    goal = parse(
+        run_cli(
+            "goal",
+            "add",
+            "x",
+            "--idea",
+            str(idea_a["id"]),
+            "--idea",
+            str(idea_b["id"]),
+            "--json",
+        )
+    )
+    run_cli("delete", str(idea_a["id"]), "--json")
+
+    goals = parse(run_cli("goal", "list", "--json"))["goals"]
+    assert goals[0]["idea_ids"] == [idea_b["id"]]
 
 
 # ---- help / misc ----

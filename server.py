@@ -112,9 +112,12 @@ def create_goal():
     if not text:
         return jsonify({"error": "text is required"}), 400
 
-    idea_id = payload.get("idea_id")
-    if idea_id is not None and not isinstance(idea_id, int):
-        return jsonify({"error": "idea_id must be an integer"}), 400
+    idea_ids = payload.get("idea_ids")
+    if idea_ids is not None and (
+        not isinstance(idea_ids, list)
+        or not all(isinstance(i, int) and not isinstance(i, bool) for i in idea_ids)
+    ):
+        return jsonify({"error": "idea_ids must be a list of integers"}), 400
 
     weekdays = payload.get("weekdays")
     if weekdays is not None and (
@@ -141,7 +144,7 @@ def create_goal():
         goal = dbutil.create_goal(
             conn,
             text,
-            idea_id=idea_id,
+            idea_ids=idea_ids,
             weekdays=weekdays,
             target_date=target_date,
         )
@@ -198,11 +201,31 @@ def link_goal_route(goal_id):
 
 @app.post("/api/goals/<int:goal_id>/unlink")
 def unlink_goal_route(goal_id):
+    payload = request.get_json(silent=True) or {}
+    idea_id = payload.get("idea_id")
+    if not isinstance(idea_id, int) or isinstance(idea_id, bool):
+        return jsonify({"error": "idea_id (integer) is required"}), 400
+
     with dbutil.connection() as conn:
-        goal = dbutil.unlink_goal(conn, goal_id)
+        goal = dbutil.unlink_goal(conn, goal_id, idea_id)
         if goal is None:
             return jsonify({"error": "no goal with that id"}), 404
         return jsonify(goal)
+
+
+@app.get("/api/goals/completed")
+def completed_goals_route():
+    with dbutil.connection() as conn:
+        return jsonify(dbutil.completed_goals(conn))
+
+
+@app.get("/api/ideas/<int:idea_id>/goals")
+def idea_goals_route(idea_id):
+    with dbutil.connection() as conn:
+        goals = dbutil.goals_for_idea(conn, idea_id)
+        if goals is None:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(goals)
 
 
 @app.get("/api/goals/streak")

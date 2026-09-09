@@ -63,13 +63,12 @@ CREATE TABLE IF NOT EXISTS ideas (
 );
 """
 
-GOAL_COLUMNS = "id, text, idea_id, weekdays, target_date, created_at, archived_at"
+GOAL_COLUMNS = "id, text, weekdays, target_date, created_at, archived_at"
 
 GOALS_TABLE = """
 CREATE TABLE IF NOT EXISTS goals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     text TEXT NOT NULL,
-    idea_id INTEGER,
     weekdays TEXT,
     target_date TEXT,
     created_at TEXT NOT NULL,
@@ -88,6 +87,16 @@ CREATE TABLE IF NOT EXISTS goal_log (
     date TEXT NOT NULL,
     completed_at TEXT,
     UNIQUE(goal_id, date)
+);
+
+-- a goal can link to more than one idea (and an idea can have more than
+-- one goal, already true before this table existed) -- see
+-- _ensure_goal_ideas_join_table for the migration off the old single
+-- idea_id column.
+CREATE TABLE IF NOT EXISTS goal_ideas (
+    goal_id INTEGER NOT NULL,
+    idea_id INTEGER NOT NULL,
+    PRIMARY KEY (goal_id, idea_id)
 );
 
 CREATE TABLE IF NOT EXISTS import_log (
@@ -238,16 +247,56 @@ def _ensure_goal_weekdays(conn: sqlite3.Connection) -> None:
     if row is None or "weekdays" in row["sql"]:
         return
 
-    conn.executescript(f"""
+    # Deliberately NOT {GOALS_TABLE}/{GOAL_COLUMNS} here -- those describe
+    # the *current* schema, which has moved on since this migration was
+    # written (idea_id later became its own join table). This migration's
+    # job is frozen in history: produce the goals shape as it stood right
+    # after weekdays replaced recurring, still with idea_id -- a later
+    # migration (_ensure_goal_ideas_join_table) takes it from there.
+    conn.executescript("""
         BEGIN;
         ALTER TABLE goals RENAME TO goals_pre_weekdays;
-        {GOALS_TABLE}
-        INSERT INTO goals ({GOAL_COLUMNS})
+        CREATE TABLE IF NOT EXISTS goals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT NOT NULL,
+            idea_id INTEGER,
+            weekdays TEXT,
+            target_date TEXT,
+            created_at TEXT NOT NULL,
+            archived_at TEXT
+        );
+        INSERT INTO goals (id, text, idea_id, weekdays, target_date, created_at, archived_at)
             SELECT id, text, idea_id,
                    CASE WHEN recurring = 1 THEN '0,1,2,3,4,5,6' ELSE NULL END,
                    target_date, created_at, archived_at
             FROM goals_pre_weekdays;
         DROP TABLE goals_pre_weekdays;
+        COMMIT;
+        """)
+
+
+def _ensure_goal_ideas_join_table(conn: sqlite3.Connection) -> None:
+    """Replace the single idea_id column with the goal_ideas join table, so
+    a goal can link to more than one idea. Same rename/create/copy/drop
+    dance as the other goal-schema migrations, guarded so it runs once.
+    Backfill: an old non-NULL idea_id becomes one row in goal_ideas.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'goals'"
+    ).fetchone()
+    if row is None or "idea_id" not in row["sql"]:
+        return
+
+    conn.executescript(f"""
+        BEGIN;
+        ALTER TABLE goals RENAME TO goals_pre_join_ideas;
+        {GOALS_TABLE}
+        INSERT INTO goals ({GOAL_COLUMNS})
+            SELECT id, text, weekdays, target_date, created_at, archived_at
+            FROM goals_pre_join_ideas;
+        INSERT INTO goal_ideas (goal_id, idea_id)
+            SELECT id, idea_id FROM goals_pre_join_ideas WHERE idea_id IS NOT NULL;
+        DROP TABLE goals_pre_join_ideas;
         COMMIT;
         """)
 
@@ -282,6 +331,7 @@ def get_conn() -> sqlite3.Connection:
     _ensure_fields_column(conn)
     _ensure_frontier_status(conn)
     _ensure_goal_weekdays(conn)
+    _ensure_goal_ideas_join_table(conn)
     _migrate_from_v1_daily_goals(conn)
     _ensure_encrypted_content(conn)
     return conn
@@ -375,8 +425,9 @@ def update_idea(conn: sqlite3.Connection, idea_id: int, updates: dict) -> dict |
 # ---- goals ----
 #
 # A goal is its own thing -- its own text, e.g. "walk 10000 steps" -- not a
-# tagged idea. It can optionally point at an idea (a concrete step toward
-# that longer-term objective) but doesn't have to. A goal is either:
+# tagged idea. It can optionally link to one or more ideas (concrete steps
+# toward those longer-term objectives) but doesn't have to -- see the
+# goal_ideas join table. A goal is either:
 #   - recurring: due on whichever weekday(s) it's set to (Monday=0..Sunday=6),
 #     from its created_at date until it's stopped (archived_at set) -- all
 #     seven days is a daily habit, one day is a weekly check-in, any other
@@ -395,16 +446,18 @@ def today_str() -> str:
 def create_goal(
     conn: sqlite3.Connection,
     text: str,
-    idea_id: int | None = None,
+    idea_ids: list[int] | None = None,
     weekdays: list[int] | None = None,
     target_date: str | None = None,
 ) -> dict | None:
-    """Returns None if idea_id is given but doesn't exist. A non-empty
+    """Returns None if any given idea id doesn't exist. A non-empty
     `weekdays` (Monday=0..Sunday=6) makes the goal recurring and ignores
     target_date; otherwise it's one-off, defaulting target_date to today if
     not given."""
-    if idea_id is not None and get_idea(conn, idea_id) is None:
-        return None
+    idea_ids = sorted(set(idea_ids)) if idea_ids else []
+    for idea_id in idea_ids:
+        if get_idea(conn, idea_id) is None:
+            return None
     weekdays = sorted(set(weekdays)) if weekdays else None
     if weekdays is None and target_date is None:
         target_date = today_str()
@@ -413,26 +466,50 @@ def create_goal(
     weekdays_str = ",".join(str(d) for d in weekdays) if weekdays else None
 
     cur = conn.execute(
-        "INSERT INTO goals (text, idea_id, weekdays, target_date, created_at) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (encrypt_str(text), idea_id, weekdays_str, target_date, now_str()),
+        "INSERT INTO goals (text, weekdays, target_date, created_at) VALUES (?, ?, ?, ?)",
+        (encrypt_str(text), weekdays_str, target_date, now_str()),
+    )
+    goal_id = cur.lastrowid
+    conn.executemany(
+        "INSERT INTO goal_ideas (goal_id, idea_id) VALUES (?, ?)",
+        [(goal_id, idea_id) for idea_id in idea_ids],
     )
     conn.commit()
-    return get_goal(conn, cur.lastrowid)
+    return get_goal(conn, goal_id)
 
 
-def row_to_goal(row: sqlite3.Row) -> dict:
+def _goal_idea_ids(conn: sqlite3.Connection, goal_id: int) -> list[int]:
+    rows = conn.execute(
+        "SELECT idea_id FROM goal_ideas WHERE goal_id = ? ORDER BY idea_id", (goal_id,)
+    ).fetchall()
+    return [r["idea_id"] for r in rows]
+
+
+def _attach_idea_summaries(conn: sqlite3.Connection, goal: dict) -> dict:
+    """Resolve a goal's linked idea_ids into {id, text} pairs -- shared by
+    every goal listing that displays which idea(s) a goal is linked to."""
+    goal["ideas"] = [
+        {"id": idea_id, "text": get_idea(conn, idea_id)["text"]}
+        for idea_id in goal["idea_ids"]
+    ]
+    return goal
+
+
+def row_to_goal(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     goal = dict(row)
     goal["text"] = decrypt_str(goal["text"])
     goal["weekdays"] = (
         [int(d) for d in goal["weekdays"].split(",")] if goal["weekdays"] else None
     )
+    goal["idea_ids"] = _goal_idea_ids(conn, goal["id"])
     return goal
 
 
 def get_goal(conn: sqlite3.Connection, goal_id: int) -> dict | None:
     row = conn.execute("SELECT * FROM goals WHERE id = ?", (goal_id,)).fetchone()
-    return row_to_goal(row) if row else None
+    if row is None:
+        return None
+    return _attach_idea_summaries(conn, row_to_goal(conn, row))
 
 
 def missing_goal_ids(conn: sqlite3.Connection, goal_ids: list[int]) -> list[int]:
@@ -460,37 +537,46 @@ def stop_goal(conn: sqlite3.Connection, goal_id: int) -> bool:
 
 
 def remove_goal(conn: sqlite3.Connection, goal_id: int) -> bool:
-    """Hard-delete a goal definition and all of its completion history."""
+    """Hard-delete a goal definition, its completion history, and its idea
+    link(s)."""
     conn.execute("DELETE FROM goal_log WHERE goal_id = ?", (goal_id,))
+    conn.execute("DELETE FROM goal_ideas WHERE goal_id = ?", (goal_id,))
     cur = conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
     conn.commit()
     return cur.rowcount > 0
 
 
 def unlink_goals_from_idea(conn: sqlite3.Connection, idea_id: int) -> None:
-    """Called when an idea is deleted: the goal(s) that referenced it keep
-    existing (and keep their history) -- they just lose the link, since
-    completion was never derived from the idea in the first place."""
-    conn.execute("UPDATE goals SET idea_id = NULL WHERE idea_id = ?", (idea_id,))
+    """Called when an idea is deleted: the goal(s) linked to it keep
+    existing (and keep their history, and any other idea links they have)
+    -- they just lose this one link, since completion was never derived
+    from the idea in the first place."""
+    conn.execute("DELETE FROM goal_ideas WHERE idea_id = ?", (idea_id,))
 
 
 def link_goal(conn: sqlite3.Connection, goal_id: int, idea_id: int) -> dict | None:
-    """Set (or change) an existing goal's idea link -- for a goal created
-    before its idea existed, or one you've decided should point somewhere
-    else. Returns None if the goal or the idea doesn't exist."""
+    """Add a link from this goal to this idea, on top of any links it
+    already has -- a goal can link to more than one idea. A no-op if
+    already linked. Returns None if the goal or the idea doesn't exist."""
     if get_goal(conn, goal_id) is None or get_idea(conn, idea_id) is None:
         return None
-    conn.execute("UPDATE goals SET idea_id = ? WHERE id = ?", (idea_id, goal_id))
+    conn.execute(
+        "INSERT OR IGNORE INTO goal_ideas (goal_id, idea_id) VALUES (?, ?)",
+        (goal_id, idea_id),
+    )
     conn.commit()
     return get_goal(conn, goal_id)
 
 
-def unlink_goal(conn: sqlite3.Connection, goal_id: int) -> dict | None:
-    """Remove one goal's idea link (the goal and its history are untouched).
-    Returns None if the goal doesn't exist."""
+def unlink_goal(conn: sqlite3.Connection, goal_id: int, idea_id: int) -> dict | None:
+    """Remove one specific goal-idea link (the goal, its history, and any
+    of its other idea links are untouched). Returns None if the goal
+    doesn't exist."""
     if get_goal(conn, goal_id) is None:
         return None
-    conn.execute("UPDATE goals SET idea_id = NULL WHERE id = ?", (goal_id,))
+    conn.execute(
+        "DELETE FROM goal_ideas WHERE goal_id = ? AND idea_id = ?", (goal_id, idea_id)
+    )
     conn.commit()
     return get_goal(conn, goal_id)
 
@@ -515,7 +601,7 @@ def goals_due_on(conn: sqlite3.Connection, date: str) -> list[dict]:
         (date, date, date, date),
     ).fetchall()
     weekday = date_cls.fromisoformat(date).weekday()
-    goals = [row_to_goal(row) for row in rows]
+    goals = [_attach_idea_summaries(conn, row_to_goal(conn, row)) for row in rows]
     return [g for g in goals if g["weekdays"] is None or weekday in g["weekdays"]]
 
 
@@ -613,3 +699,81 @@ def total_xp(conn: sqlite3.Connection) -> int:
         "SELECT COUNT(*) AS n FROM goal_log WHERE completed_at IS NOT NULL"
     ).fetchone()
     return row["n"]
+
+
+def _goal_completion_stats(conn: sqlite3.Connection, goal_id: int) -> dict:
+    row = conn.execute(
+        "SELECT COUNT(*) AS n, MIN(date) AS first, MAX(date) AS last "
+        "FROM goal_log WHERE goal_id = ? AND completed_at IS NOT NULL",
+        (goal_id,),
+    ).fetchone()
+    return {
+        "times_completed": row["n"],
+        "first_completed": row["first"],
+        "last_completed": row["last"],
+    }
+
+
+def _is_goal_completed(conn: sqlite3.Connection, goal: dict) -> bool:
+    """A recurring goal never finishes on its own -- it "completes" only by
+    being stopped, regardless of how many/few of its days were logged done.
+    A one-off goal completes exactly when its single target_date has a
+    logged completion."""
+    if goal["weekdays"] is not None:
+        return goal["archived_at"] is not None
+    row = conn.execute(
+        "SELECT 1 FROM goal_log WHERE goal_id = ? AND date = ? AND completed_at IS NOT NULL",
+        (goal["id"], goal["target_date"]),
+    ).fetchone()
+    return row is not None
+
+
+def _enrich_goal_progress(conn: sqlite3.Connection, goal: dict) -> dict:
+    """Attach `completed` and completion-history stats to a goal dict --
+    shared by goals_for_idea and completed_goals, the two progress views.
+    goal must already carry idea_ids/ideas (i.e. come from row_to_goal +
+    _attach_idea_summaries, or get_goal)."""
+    goal["completed"] = _is_goal_completed(conn, goal)
+    goal.update(_goal_completion_stats(conn, goal["id"]))
+    return goal
+
+
+def goals_for_idea(conn: sqlite3.Connection, idea_id: int) -> list[dict] | None:
+    """Every goal linked to one idea, current and completed alike, each
+    enriched with progress -- what the idea detail view shows so progress
+    made toward it is visible. None if the idea doesn't exist."""
+    if get_idea(conn, idea_id) is None:
+        return None
+    rows = conn.execute(
+        "SELECT g.id, g.text, g.weekdays, g.target_date, g.created_at, g.archived_at "
+        "FROM goals g JOIN goal_ideas gi ON gi.goal_id = g.id "
+        "WHERE gi.idea_id = ? ORDER BY g.created_at",
+        (idea_id,),
+    ).fetchall()
+    return [
+        _enrich_goal_progress(
+            conn, _attach_idea_summaries(conn, row_to_goal(conn, row))
+        )
+        for row in rows
+    ]
+
+
+def completed_goals(conn: sqlite3.Connection) -> list[dict]:
+    """Every completed goal across the whole database (one-off goals marked
+    done, recurring goals that have been stopped) -- the goals screen's
+    progress history, most-recently-completed first. Each is enriched like
+    goals_for_idea."""
+    rows = conn.execute(
+        f"SELECT {GOAL_COLUMNS} FROM goals ORDER BY created_at DESC"
+    ).fetchall()
+    result = []
+    for row in rows:
+        goal = _enrich_goal_progress(
+            conn, _attach_idea_summaries(conn, row_to_goal(conn, row))
+        )
+        if goal["completed"]:
+            result.append(goal)
+    result.sort(
+        key=lambda g: g["last_completed"] or g["archived_at"] or "", reverse=True
+    )
+    return result

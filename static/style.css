@@ -25,6 +25,27 @@
 
   --sans: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
+  --display: var(--mono);
+}
+
+/* ---- style: three selectable visual identities (terminal / horizon /
+   notebook), cycled by their own top-bar toggle and persisted in
+   localStorage, exactly like the theme toggle above. Each only touches
+   typography (--display, used for the wordmark/stat numbers/column
+   headers) plus a couple of structural flourishes on the existing markup --
+   never the dark/light color tokens, so every style still works in both
+   themes. All three are system font stacks: this app declares "no external
+   network calls" in AGENTS.md, so no webfont CDN. Default (no data-style
+   attribute) is "terminal". Pure GUI/localStorage state, same
+   nothing-to-script-against exception as the theme toggle -- no CLI
+   equivalent. ---- */
+
+:root[data-style="horizon"] {
+  --display: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+}
+
+:root[data-style="notebook"] {
+  --display: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
 }
 
 :root[data-theme="light"] {
@@ -95,12 +116,14 @@ body {
   flex-shrink: 0;
 }
 
-/* wordmark set in the capture font, not the UI font: this app's whole
-   reason for existing is `idea "text"` at a shell prompt, so the one
-   place we allow ourselves a flourish echoes that command line. */
+/* wordmark set in --display, not the UI font: this app's whole reason for
+   existing is `idea "text"` at a shell prompt, so the one deliberate
+   flourish echoes that -- in the terminal style, --display *is* the mono
+   command-line face; horizon/notebook reinterpret the same flourish in
+   their own display serif instead. */
 .brand {
-  font-family: var(--mono);
-  font-size: 14px;
+  font-family: var(--display);
+  font-size: 15px;
   letter-spacing: -0.02em;
   color: var(--gold);
   flex-shrink: 0;
@@ -142,7 +165,8 @@ body {
 }
 
 .screen-tab,
-.theme-toggle {
+.theme-toggle,
+.style-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -159,7 +183,8 @@ body {
 }
 
 .screen-tab:hover,
-.theme-toggle:hover {
+.theme-toggle:hover,
+.style-toggle:hover {
   color: var(--text);
   border-color: var(--text-dim);
 }
@@ -325,7 +350,8 @@ body {
 
 .column-title {
   margin: 0 0 12px 2px;
-  font-size: 13px;
+  font-family: var(--display);
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-dim);
   letter-spacing: 0.01em;
@@ -336,6 +362,17 @@ body {
 .column[data-status="horizon"] .column-title { color: var(--teal); }
 .column[data-status="frontier"] .column-title { color: var(--teal); opacity: 0.7; }
 .column[data-status="archive"] .column-title { color: var(--red); }
+
+/* horizon's signature: the board itself reads as a landscape -- each
+   status a little further off than the last, inbox sharp and near,
+   frontier soft and far, echoing the app's own "horizon"/"frontier"
+   vocabulary instead of decorating it with something unrelated. */
+:root[data-style="horizon"] .column[data-status="inbox"] .column-title { opacity: 1; }
+:root[data-style="horizon"] .column[data-status="active"] .column-title { opacity: 0.95; }
+:root[data-style="horizon"] .column[data-status="queued"] .column-title { opacity: 0.85; letter-spacing: 0.02em; }
+:root[data-style="horizon"] .column[data-status="horizon"] .column-title { opacity: 0.72; letter-spacing: 0.03em; }
+:root[data-style="horizon"] .column[data-status="frontier"] .column-title { opacity: 0.55; letter-spacing: 0.05em; }
+:root[data-style="horizon"] .column[data-status="archive"] .column-title { opacity: 0.9; }
 
 .cards {
   display: flex;
@@ -486,16 +523,53 @@ body {
   gap: 14px;
 }
 
+/* notebook's signature: faint ruled-paper lines behind the whole goals
+   screen, purely a background image -- never touches border/color
+   properties, so it can't collide with any status-accent border rule. */
+:root[data-style="notebook"] .goals-screen-inner {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 27px,
+    var(--border) 28px
+  );
+}
+
 .goals-stats {
   display: flex;
-  gap: 10px;
-  font-family: var(--mono);
-  font-size: 11px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 16px;
+  font-family: var(--display);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
   color: var(--text-dim);
+  padding: 10px 2px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .goals-stats .active {
   color: var(--gold);
+}
+
+/* horizon: the stat line sits in a soft gold gradient band instead of
+   between hairline rules -- a dashboard readout, not a ledger line. */
+:root[data-style="horizon"] .goals-stats {
+  border: none;
+  border-radius: 4px;
+  padding: 16px 12px;
+  background: linear-gradient(180deg, transparent, var(--gold-glow));
+}
+
+/* notebook: a heading rule under the stat line, doubled like a ledger
+   total -- paired with the ruled-paper background on the whole screen
+   below (see .goals-screen-inner). */
+:root[data-style="notebook"] .goals-stats {
+  border: none;
+  border-bottom: 3px double var(--border-strong);
+  padding-bottom: 12px;
 }
 
 .goal-add-form {
@@ -549,23 +623,18 @@ body {
   display: none;
 }
 
+.goal-add-idea-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .goal-add-idea-label {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--text-dim);
   flex-shrink: 0;
-}
-
-.goal-add-row select {
-  flex: 1;
-  min-width: 0;
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-family: var(--sans);
-  font-size: 12px;
-  padding: 5px 6px;
-  border-radius: 3px;
 }
 
 .goal-date-settings {
@@ -669,38 +738,76 @@ body {
   padding: 1px 5px;
 }
 
-.goal-row-idea {
+/* ---- idea-linking chips: shared by the goal-add form (local state) and
+   every goal row -- current or completed -- since a goal can link to more
+   than one idea, and a past/completed goal should stay linkable too, not
+   just an active one. Each chip is a clickable label (jumps to the idea on
+   the board, where that makes sense) plus a small × to unlink; the trailing
+   select adds another link and always shows only ideas not already linked. */
+
+.goal-idea-chips {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
-.goal-row-idea-select {
+.goal-idea-chip {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid var(--teal);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.goal-idea-chip-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--teal);
+  background: transparent;
+  border: none;
+  padding: 1px 4px;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+button.goal-idea-chip-label {
+  cursor: pointer;
+}
+
+button.goal-idea-chip-label:hover {
+  background: var(--surface-hover);
+}
+
+.goal-idea-chip-remove {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--text-dim);
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  padding: 1px 3px;
-  max-width: 140px;
-}
-
-.goal-row-idea-select.linked {
-  color: var(--teal);
-  border-color: var(--teal);
-}
-
-.goal-idea-jump {
-  font-family: var(--mono);
-  font-size: 10px;
-  color: var(--teal);
-  background: transparent;
-  border: 1px solid var(--teal);
-  border-radius: 2px;
-  padding: 0px 4px;
+  border: none;
+  border-left: 1px solid var(--border);
+  padding: 1px 4px;
   cursor: pointer;
   line-height: 1.4;
+}
+
+.goal-idea-chip-remove:hover {
+  color: var(--red);
+}
+
+.goal-idea-add-select {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  border-radius: 2px;
+  padding: 1px 3px;
+  max-width: 110px;
 }
 
 .goal-row-actions {
@@ -729,6 +836,57 @@ body {
   font-size: 12px;
   color: var(--text-dim);
   opacity: 0.7;
+}
+
+/* ---- goal history: completed goals (one-off goals done, recurring goals
+   stopped) -- a visual record of progress, physically separated below the
+   active goal list by its own heading + divider. ---- */
+
+.goal-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.goal-history-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.goal-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.goal-history-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--teal-border-soft);
+  border-radius: 3px;
+  opacity: 0.85;
+}
+
+.goal-history-text {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  text-decoration: line-through;
+  word-wrap: break-word;
+}
+
+.goal-history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 /* ---- detail modal ---- */
@@ -819,12 +977,12 @@ body {
 
 .field-row {
   display: flex;
+  align-items: center;
   gap: 6px;
   margin-bottom: 6px;
 }
 
 .field-row input {
-  flex: 1;
   min-width: 0;
   background: var(--bg);
   border: 1px solid var(--border-strong);
@@ -838,6 +996,25 @@ body {
 
 .field-row input:focus {
   border-color: var(--gold);
+}
+
+/* key : value, not two identical anonymous boxes -- a narrower gold-toned
+   key input, a visible colon, and a wider value input so the row reads as
+   one structured pair instead of two unrelated fields. */
+.field-row .field-key {
+  flex: 0 1 30%;
+  color: var(--gold);
+}
+
+.field-row .field-sep {
+  flex-shrink: 0;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.field-row .field-value {
+  flex: 1 1 auto;
 }
 
 .field-row-remove {
@@ -869,6 +1046,66 @@ body {
 .modal-add-field:hover {
   color: var(--text);
   border-color: var(--text-dim);
+}
+
+/* ---- modal goals: everything linked to this idea, split into "current"
+   (gold, matches an active idea/goal's accent) and "completed" (teal +
+   struck-through, matches a done goal-history row) -- both color and a
+   physical group boundary distinguish them, per the goals-linking design. */
+
+.modal-goals {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-goal-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-goal-group-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.modal-goal-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--gold);
+  border-radius: 3px;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.modal-goal-row.completed {
+  border-left-color: var(--teal-border-soft);
+  opacity: 0.75;
+}
+
+.modal-goal-row.completed .modal-goal-text {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
+.modal-goal-text {
+  flex: 1;
+  min-width: 0;
+  word-wrap: break-word;
+}
+
+.modal-goals-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  opacity: 0.7;
 }
 
 .modal-notes {

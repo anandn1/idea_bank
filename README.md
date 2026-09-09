@@ -141,19 +141,41 @@ idea goal add "walk 10000 steps" --weekdays daily      every day, no idea link
 idea goal add "gym" --weekdays mon,wed,fri               specific weekdays
 idea goal add "draft the proposal" --idea 12 --date 2026-10-01
                                                            one-off, any date
+idea goal add "shared goal" --idea 12 --idea 7          linked to two ideas at once
 idea goal list                                          show today's due goals
 idea goal done 5                                        mark goal #5 done for today
 idea goal undo 5                                        unmark it
 idea goal stop 5                                        stop a recurring goal (keeps history)
 idea goal remove 5                                      delete a goal and its history
-idea goal link 5 12                                     link an existing goal to idea #12
-idea goal unlink 5                                      remove goal #5's idea link
+idea goal link 5 12                                     add a link from goal #5 to idea #12
+idea goal unlink 5 12                                   remove just that one link
 idea goal streak                                        current streak and lifetime xp
+idea goal history                                       completed goals: the progress archive
+idea show 12                                            an idea's detail, including its linked goals
 ```
 
-A goal doesn't need its idea to exist first -- add the goal, capture the
+A goal can link to **more than one idea at once** — `--idea` on `goal add` is
+repeatable, and `goal link`/`goal unlink` each act on exactly one
+goal-idea pair, adding or removing that one link without touching any
+others the goal has. There's no "the" linked idea to replace; `goal link`
+never overwrites an existing link, it only ever adds another one alongside
+it.
+
+**Completed goals / progress archive** — a goal is "completed" once there's
+nothing left due about it: a one-off goal completes the moment its single
+target date is marked done, and a recurring goal completes when it's
+`stop`ped (an active daily habit never counts as "completed" just because
+some days were checked off -- it only completes by being stopped, keeping
+its history). `idea goal history` lists every completed goal, newest first,
+with how many times it was ever marked done and, when it's linked, the
+idea's text. `idea show <id>` now also lists that idea's linked goals
+(current and completed both), so an idea's detail view is where its
+progress toward it lives.
+
+A goal doesn't need its idea(s) to exist first -- add the goal, capture an
 idea whenever (CLI or GUI), then `goal link` them; `goal unlink` removes
-the link without touching either record. Linking works from either surface.
+one link without touching either record or any of the goal's other links.
+Linking, including to a completed/past goal, works from either surface.
 
 The same thing from the GUI is its own **full screen**, and it's the one you
 land on first — press `g` (or click the `goals` tab in the top bar) to get
@@ -169,9 +191,23 @@ smart-default cutoff (and an option to turn it off entirely) is a
 per-browser preference, not stored in the database -- same as the theme
 toggle, it has no CLI equivalent because there's nothing for it to default
 *for* on the command line, where you always say the date explicitly. Every
-goal row also carries its own idea-link select (blank = unlinked; picking
-an idea links it, clearing it back to blank unlinks it) plus a small `↗`
-button to jump to the linked idea on the board, when one's set.
+goal row carries a set of idea **chips** -- one per linked idea, each a
+clickable label (jumps to that idea on the board) plus a small `×` to
+unlink just that one -- and a trailing "+ link idea" dropdown (always
+showing only ideas not already linked) to add another. A goal can be
+linked to as many ideas as make sense; there's no single "the" link to
+overwrite.
+
+Below the active goal list, a **completed** section shows the progress
+archive -- every completed goal (see above for what "completed" means),
+each tagged with its recurrence, how many times it was ever marked done,
+when it was last completed, and the same idea chips as an active goal row
+-- completed goals stay fully linkable and unlinkable too, not just
+current ones. Opening an idea's detail view (see below) shows the same
+thing scoped to that one idea: every goal linked to it, grouped into
+**current** (gold-accented) and **completed** (teal-accented, struck
+through) -- both a color and a physical group boundary, so progress toward
+an idea is visible at a glance without reading each row's text.
 
 Deleting an idea that a goal links to **unlinks** it rather than deleting the
 goal -- the goal and its history are independent of the idea's lifecycle, so
@@ -179,12 +215,21 @@ they survive (CLI, GUI, and the JSON API `DELETE /api/ideas/<id>` all do
 this).
 
 JSON API: `GET /api/goals?date=` (today's due goals, default today),
-`POST /api/goals {"text": ..., "idea_id": ..., "weekdays": [0,2,4], "target_date": ...}`
+`POST /api/goals {"text": ..., "idea_ids": [...], "weekdays": [0,2,4], "target_date": ...}`
 (`weekdays` is Monday=0..Sunday=6; a non-empty list makes the goal recurring
 and `target_date` doesn't apply, same mutual exclusivity as `--weekdays`/
-`--date` on the CLI), `PATCH /api/goals/<id> {"completed": true/false, "date": ...}`,
-`POST /api/goals/<id>/stop`, `POST /api/goals/<id>/link {"idea_id": ...}`,
-`POST /api/goals/<id>/unlink`, `DELETE /api/goals/<id>`, `GET /api/goals/streak`.
+`--date` on the CLI; `idea_ids` is a list -- a goal can link to several ideas
+at creation), `PATCH /api/goals/<id> {"completed": true/false, "date": ...}`,
+`POST /api/goals/<id>/stop`, `POST /api/goals/<id>/link {"idea_id": ...}`
+(adds one link, on top of any the goal already has),
+`POST /api/goals/<id>/unlink {"idea_id": ...}` (removes just that one link --
+`idea_id` is required now that a goal can have more than one),
+`DELETE /api/goals/<id>`, `GET /api/goals/streak`,
+`GET /api/goals/completed` (the progress archive, newest-completed first),
+`GET /api/ideas/<id>/goals` (every goal linked to that idea, current and
+completed alike, each carrying a `"completed"` bool and completion stats).
+Every goal payload carries `"idea_ids"` (a plain list of ids) and
+`"ideas"` (the same ids resolved to `{"id", "text"}` pairs, for display).
 
 **GUI** — `server.py` serves `static/index.html` and a small JSON API
 (`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`, plus the goals routes
@@ -195,10 +240,10 @@ top-bar tab pair -- for browsing, moving, editing, and completing what
 already exists, keyboard-first. The board screen opens with a labeled
 "New idea" box (a text field, a status pill group defaulting to `inbox`,
 and an "Add idea" button) above the columns, so capturing works from either
-surface. See **Goals** above for how linking works from the GUI (an
-at-add-time dropdown, plus a per-row select) and the CLI/GUI equivalence
-note in `AGENTS.md` for the reasoning behind what little still doesn't
-carry over between the two surfaces.
+surface. See **Goals** above for how linking works from the GUI (chips per
+goal row, an at-add-time chip picker, both allowing more than one idea per
+goal) and the CLI/GUI equivalence note in `AGENTS.md` for the reasoning
+behind what little still doesn't carry over between the two surfaces.
 
 - `g` / `i` (or the top-bar tabs) switch between the **goals** and **board**
   screens — see **Goals** above.
@@ -220,8 +265,10 @@ carry over between the two surfaces.
   single selection.
 - **Enter** (or double-click, or drag) opens the focused card's **detail
   view** — a modal with the full text (editable), status (as pills), every
-  structured field (editable, with an "add field" row), freeform notes, and
-  a delete button. Typing in the modal never triggers board shortcuts.
+  structured field (editable, with an "add field" row, each row reading as
+  `key : value` rather than two anonymous boxes), goals linked to this idea
+  (current vs. completed, see **Goals** above), freeform notes, and a
+  delete button. Typing in the modal never triggers board shortcuts.
   Closing it (the `×`, "done", or clicking the backdrop) saves everything
   at once; **Escape discards** instead, matching the inline `e` edit's
   convention. This is the GUI's full equivalent of `idea show` + `idea edit
@@ -236,6 +283,20 @@ carry over between the two surfaces.
   (same accent hues, re-tuned for contrast), and "system" (follows your OS's
   light/dark setting). Persisted in your browser's `localStorage`, so it's
   per-browser, not stored in the database.
+- **Style**: the `style: terminal` / `style: horizon` / `style: notebook`
+  button next to the theme toggle cycles between three visual identities --
+  independent of dark/light, and combines with either. All three are system
+  font stacks (no webfont CDN, matching this project's no-external-network-calls
+  rule): **terminal** (the default) leans into the app's own `$ idea`
+  command-line identity -- bold monospace stat numbers, a thin ruled status
+  line. **horizon** sets stat numbers and column headers in a serif display
+  face inside a soft gradient band, and fades each board column's title a
+  little further per status (crisp Inbox, soft Frontier), echoing the
+  status names' own near-to-far vocabulary instead of decorating it with
+  something unrelated. **notebook** sets the same display text in a warmer
+  serif, doubles the rule under the stat line like a ledger total, and adds
+  faint ruled-paper lines behind the whole goals screen. Persisted in
+  `localStorage`, same per-browser, no-CLI-equivalent exception as theme.
 - **Pop out an idea**: the detail modal's "pop out" button opens the same
   idea in a separate browser window (`static/idea.html`) — the full editor
   (text, status, fields, notes), not squeezed into the board's modal, useful
@@ -424,11 +485,36 @@ you're ready to touch that file.
   package (webkit2gtk) beyond what's already installed; a `.desktop` entry
   plus `--app=` on the browser you already have gives the same "click an
   icon, get an app window" result with no new dependency.
-- **Only dark/light/system, no arbitrary theme picker.** Extra accent color
-  swatches were considered and left out — the app has a specific, deliberate
-  palette (mono wordmark, muted gold/teal/red status colors), and a color
-  picker would mostly just invite a mismatched combination without adding
-  real usefulness.
+- **Dark/light/system stays a color-only toggle; the separate style toggle
+  is curated, not an arbitrary picker.** A freeform accent color picker was
+  considered and left out — the app has a specific, deliberate palette
+  (gold/teal/red status colors), and a color picker would mostly just
+  invite a mismatched combination without adding real usefulness. What *was*
+  added is a second, independent toggle for a handful of designed-together
+  identities (terminal/horizon/notebook -- typography plus a couple of
+  structural flourishes each, never colors), which composes with dark/light
+  rather than replacing it.
+- **The three GUI styles are system font stacks, not a webfont CDN.**
+  AGENTS.md declares "no external network calls" as an architecture
+  invariant; horizon and notebook's serif display faces (Georgia/Iowan Old
+  Style/Palatino, in different pairings) are chosen from what's already on
+  a typical desktop rather than pulling in Google Fonts or similar.
+- **"Completed" for a recurring goal means stopped, not "all its logged days
+  were done."** A daily habit with 40/60 days checked off is still *current*
+  until you `stop` it -- otherwise a goal-day you're behind on but haven't
+  given up on would flicker in and out of the "completed" archive depending
+  on today's check-in, which isn't what a progress archive is for. A one-off
+  goal has no such ambiguity: it completes exactly when its one target date
+  is marked done.
+- **Goal-idea linking is many-to-many, via a `goal_ideas` join table, not a
+  single `idea_id` column on `goals`.** The original single-link column
+  worked until a goal needed to represent progress toward more than one
+  idea at once (e.g. a shared milestone). Migrating meant `goal unlink`
+  could no longer mean "clear the link" -- it now takes a specific idea id,
+  since there can be more than one to choose from, mirroring `goal link`'s
+  own (goal, idea) argument shape exactly. Old single-idea_id data
+  migrates automatically (`dbutil._ensure_goal_ideas_join_table`), one row
+  per non-NULL `idea_id` becomes one `goal_ideas` row.
 - **Encryption covers free text, not status/dates/ids.** Those columns
   drive SQL directly (`WHERE status = ...`, `ORDER BY updated_at`, the
   status `CHECK` constraint) and aren't personal content on their own, so

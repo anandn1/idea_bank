@@ -132,6 +132,18 @@ def format_weekdays(weekdays: list[int] | None) -> str:
     return "/".join(WEEKDAY_DISPLAY[d] for d in sorted(days))
 
 
+def format_idea_note(goal: dict, with_text: bool = False) -> str:
+    """Human-readable note listing a goal's linked idea(s) -- a goal can
+    link to more than one, so this is always a list, never a single id."""
+    if not goal["ideas"]:
+        return ""
+    if with_text:
+        parts = ", ".join(f"#{i['id']}: {i['text']}" for i in goal["ideas"])
+    else:
+        parts = ", ".join(f"#{i['id']}" for i in goal["ideas"])
+    return f"  (idea {parts})"
+
+
 def parse_ids_and_status(
     tokens: list[str], status_flag: str | None
 ) -> tuple[list[int], str] | tuple[None, str]:
@@ -238,6 +250,8 @@ def build_epilog() -> str:
         "  idea goal link 5 12                              link an existing goal to idea #12\n"
         "  idea goal unlink 5                               remove goal #5's idea link\n"
         "  idea goal streak                                 current streak and lifetime xp\n"
+        "  idea goal history                                completed goals: the progress archive\n"
+        "  idea show 12                                     an idea's detail, including its linked goals\n"
         "  Completion is always self-reported -- a goal never derives 'done' from\n"
         "  an idea's status, since most goals (like the steps example) have no idea.\n"
         "  A goal doesn't need its idea to exist first -- add the goal, capture the\n"
@@ -369,8 +383,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="the goal's own text (quote it, or leave unquoted), e.g. 'walk 10000 steps'",
     )
     goal_add.add_argument(
-        "--idea", type=int, metavar="id", dest="idea_id",
-        help="optionally link this goal to an existing idea",
+        "--idea", type=int, metavar="id", dest="idea_ids", action="append",
+        help="optionally link this goal to an existing idea -- repeatable "
+        "(pass --idea more than once to link it to several ideas at once)",
     )
     goal_add.add_argument(
         "--weekdays", metavar="daily|weekdays|weekends|mon,wed,fri",
@@ -420,10 +435,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_json_flag(goal_remove)
 
     goal_link = goal_sub.add_parser(
-        "link", help="link an existing goal to an idea (or change its link)",
+        "link", help="link a goal to an idea (a goal can link to several -- call again to add more)",
         description=(
-            "Set or change an existing goal's idea link -- for a goal created "
-            "before its idea existed, or one that should now point somewhere else."
+            "Add a link from an existing goal to an existing idea, on top of "
+            "any links it already has -- a goal can link to more than one idea "
+            "at once. Call this again with a different idea id to add another "
+            "link; it never replaces an existing one."
         ),
     )
     goal_link.add_argument("goal_id", type=int)
@@ -431,15 +448,31 @@ def build_parser() -> argparse.ArgumentParser:
     add_json_flag(goal_link)
 
     goal_unlink = goal_sub.add_parser(
-        "unlink", help="remove one or more goals' idea link (keeps the goal itself)",
+        "unlink", help="remove one goal-idea link (the goal can still have other links)",
+        description=(
+            "Remove one specific link between a goal and an idea -- the goal, "
+            "its history, and any other idea links it has are untouched."
+        ),
     )
-    goal_unlink.add_argument("ids", type=int, nargs="+", metavar="id")
+    goal_unlink.add_argument("goal_id", type=int)
+    goal_unlink.add_argument("idea_id", type=int)
     add_json_flag(goal_unlink)
 
     goal_streak = goal_sub.add_parser(
         "streak", help="show the current streak and lifetime xp",
     )
     add_json_flag(goal_streak)
+
+    goal_history = goal_sub.add_parser(
+        "history", help="show completed goals: a progress archive",
+        description=(
+            "List every completed goal -- a one-off goal that's been marked "
+            "done, or a recurring goal that's been stopped -- newest first. "
+            "This is the progress archive, a visual record of what's been "
+            "finished; still-active goals stay in `goal list` instead."
+        ),
+    )
+    add_json_flag(goal_history)
 
     return parser
 
@@ -540,9 +573,13 @@ def cmd_show(args) -> int:
         if missing:
             return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
         ideas = [dbutil.get_idea(conn, idea_id) for idea_id in args.ids]
+        goals_by_idea = {
+            idea["id"]: dbutil.goals_for_idea(conn, idea["id"]) for idea in ideas
+        }
 
     if args.json:
-        print(json.dumps(ideas[0] if len(ideas) == 1 else ideas))
+        payload = [{**idea, "goals": goals_by_idea[idea["id"]]} for idea in ideas]
+        print(json.dumps(payload[0] if len(payload) == 1 else payload))
         return 0
     for i, idea in enumerate(ideas):
         if i > 0:
@@ -557,6 +594,13 @@ def cmd_show(args) -> int:
             print("fields:")
             for key, value in idea["fields"].items():
                 print(f"  {key}: {value}")
+        goals = goals_by_idea[idea["id"]]
+        if goals:
+            print("goals:")
+            for g in goals:
+                mark = "x" if g["completed"] else " "
+                tag = format_weekdays(g["weekdays"])
+                print(f"  [{mark}] #{g['id']} ({tag}) {g['text']}")
     return 0
 
 
@@ -642,19 +686,7 @@ def emit_goal(args, goal: dict, human_verb: str) -> None:
     if args.json:
         print(json.dumps(goal))
     else:
-        idea_note = f"  (linked to idea #{goal['idea_id']})" if goal["idea_id"] else ""
-        print(f"{human_verb} goal #{goal['id']}: {goal['text']}{idea_note}")
-
-
-def emit_goals(args, goals: list[dict], human_verb: str) -> None:
-    if len(goals) == 1:
-        emit_goal(args, goals[0], human_verb)
-        return
-    if args.json:
-        print(json.dumps(goals))
-    else:
-        for g in goals:
-            emit_goal(args, g, human_verb)
+        print(f"{human_verb} goal #{goal['id']}: {goal['text']}{format_idea_note(goal)}")
 
 
 def cmd_goal_add(args) -> int:
@@ -667,11 +699,13 @@ def cmd_goal_add(args) -> int:
     if not text:
         return fail(args, "goal text cannot be empty")
 
+    idea_ids = args.idea_ids or []
     with dbutil.connection() as conn:
-        if args.idea_id is not None and dbutil.get_idea(conn, args.idea_id) is None:
-            return fail(args, f"no idea with id {args.idea_id}")
+        missing = [i for i in idea_ids if dbutil.get_idea(conn, i) is None]
+        if missing:
+            return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
         goal = dbutil.create_goal(
-            conn, text, idea_id=args.idea_id, weekdays=weekdays, target_date=args.date,
+            conn, text, idea_ids=idea_ids, weekdays=weekdays, target_date=args.date,
         )
     emit_goal(args, goal, "created")
     return 0
@@ -750,11 +784,10 @@ def cmd_goal_link(args) -> int:
 
 def cmd_goal_unlink(args) -> int:
     with dbutil.connection() as conn:
-        missing = dbutil.missing_goal_ids(conn, args.ids)
-        if missing:
-            return fail(args, f"no goal(s) with id(s): {', '.join(map(str, missing))}")
-        goals = [dbutil.unlink_goal(conn, goal_id) for goal_id in args.ids]
-    emit_goals(args, goals, "unlinked")
+        if dbutil.missing_goal_ids(conn, [args.goal_id]):
+            return fail(args, f"no goal with id {args.goal_id}")
+        goal = dbutil.unlink_goal(conn, args.goal_id, args.idea_id)
+    emit_goal(args, goal, "unlinked")
     return 0
 
 
@@ -774,8 +807,7 @@ def cmd_goal_list(args) -> int:
     for g in goals:
         mark = "x" if g["completed_at"] else " "
         tag = format_weekdays(g["weekdays"])
-        idea_note = f"  (idea #{g['idea_id']})" if g["idea_id"] else ""
-        print(f"  [{mark}] #{g['id']} ({tag}) {g['text']}{idea_note}")
+        print(f"  [{mark}] #{g['id']} ({tag}) {g['text']}{format_idea_note(g)}")
     return 0
 
 
@@ -795,6 +827,26 @@ def cmd_goal_streak(args) -> int:
     return 0
 
 
+def cmd_goal_history(args) -> int:
+    with dbutil.connection() as conn:
+        goals = dbutil.completed_goals(conn)
+
+    if args.json:
+        print(json.dumps(goals))
+        return 0
+    if not goals:
+        print("no completed goals yet")
+        return 0
+    for g in goals:
+        tag = format_weekdays(g["weekdays"])
+        when = g["last_completed"] or g["archived_at"]
+        print(
+            f"  #{g['id']} ({tag}) {g['text']} -- {g['times_completed']}x, "
+            f"last {when}{format_idea_note(g, with_text=True)}"
+        )
+    return 0
+
+
 GOAL_COMMANDS = {
     "add": cmd_goal_add,
     "done": cmd_goal_done,
@@ -805,6 +857,7 @@ GOAL_COMMANDS = {
     "unlink": cmd_goal_unlink,
     "list": cmd_goal_list,
     "streak": cmd_goal_streak,
+    "history": cmd_goal_history,
 }
 
 
@@ -812,7 +865,7 @@ def cmd_goal(args) -> int:
     if args.goal_command is None:
         return fail(
             args,
-            "missing goal subcommand: add/done/undo/stop/remove/link/unlink/list/streak "
+            "missing goal subcommand: add/done/undo/stop/remove/link/unlink/list/streak/history "
             "(see `idea goal --help`)",
         )
     return GOAL_COMMANDS[args.goal_command](args)

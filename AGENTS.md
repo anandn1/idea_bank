@@ -39,10 +39,11 @@ frontend framework, no external network calls.
 
 1. **CLI/GUI equivalence, with one named exception.** Anything the GUI can
    do to an idea or goal — capture, move, edit, complete, delete, link/unlink
-   a goal to an idea — the CLI can do, and vice versa. Both ultimately call
-   the same `dbutil.py` operations, and the JSON API mirrors the CLI's
-   `--json` output shape. **Display-only GUI features have no CLI
-   equivalent** (the theme toggle, the smart-default-date cutoff, the
+   a goal to one or more ideas, browse completed-goal history — the CLI can
+   do, and vice versa. Both ultimately call the same `dbutil.py` operations, and the
+   JSON API mirrors the CLI's `--json` output shape. **Display-only GUI
+   features have no CLI equivalent** (the theme toggle, the visual-style
+   toggle, the smart-default-date cutoff, the auto-refresh interval, the
    pop-out window, the desktop launcher) — there's no data behind them to
    script against. That's the only exception. When you add a capability to
    one surface, add it to the other in the same change unless it's purely

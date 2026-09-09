@@ -18,6 +18,9 @@
   <button type="button" class="theme-toggle" id="theme-toggle" aria-label="cycle color theme" title="cycle theme (dark / light / system)">
     <span id="theme-toggle-label">theme: dark</span>
   </button>
+  <button type="button" class="style-toggle" id="style-toggle" aria-label="cycle visual style" title="cycle style (terminal / horizon / notebook)">
+    <span id="style-toggle-label">style: terminal</span>
+  </button>
   <div class="mode-indicator" id="mode-indicator" hidden></div>
   <div class="help">
     <span><b>g</b> goals</span>
@@ -51,10 +54,12 @@
           <button type="button" class="target-pill goal-weekday-pill" data-weekday="4">Fri</button>
           <button type="button" class="target-pill goal-weekday-pill" data-weekday="5">Sat</button>
         </div>
+        <div class="goal-add-idea-row">
+          <span class="goal-add-idea-label">link idea(s)</span>
+          <div class="goal-idea-chips" id="goal-add-idea-chips"></div>
+        </div>
         <div class="goal-add-row">
           <input type="date" id="goal-add-date" class="goal-add-date">
-          <label class="goal-add-idea-label" for="goal-add-idea">link idea</label>
-          <select id="goal-add-idea"><option value="">no linked idea</option></select>
           <button type="submit" class="goal-add-submit">add</button>
         </div>
       </form>
@@ -64,6 +69,11 @@
       </div>
 
       <div class="goal-list" id="goal-list"></div>
+
+      <div class="goal-history" id="goal-history">
+        <div class="goal-history-label">completed</div>
+        <div class="goal-history-list" id="goal-history-list"></div>
+      </div>
     </div>
   </section>
 
@@ -128,6 +138,11 @@
       <div class="modal-section-label">fields</div>
       <div class="modal-fields" id="modal-fields"></div>
       <button type="button" class="modal-add-field" id="modal-add-field">+ add field</button>
+    </div>
+
+    <div class="modal-section">
+      <div class="modal-section-label">goals</div>
+      <div class="modal-goals" id="modal-goals"></div>
     </div>
 
     <div class="modal-section">

@@ -67,7 +67,8 @@ priority, owner, whatever) — entirely optional, no fixed schema.
 ## Goals: separate from ideas, self-reported
 
 A goal is its own thing — its own text (e.g. "walk 10000 steps"), not a
-tagged idea — and *optionally* links to one. Ideas are long-term
+tagged idea — and *optionally* links to one or more ideas (a goal can serve
+more than one long-term objective at once). Ideas are long-term
 objectives; goals are the milestones you reach toward one. It's either
 **recurring** (due on whichever day(s) of the week you give it, via
 `--weekdays` -- "daily" is all seven, a single day is a weekly check-in,
@@ -82,24 +83,40 @@ them at all.
 idea goal add "walk 10000 steps" --weekdays daily      # every day
 idea goal add "gym" --weekdays mon,wed,fri              # specific weekdays
 idea goal add "draft the proposal" --idea 12 --date 2026-10-01   # one-off, any date
+idea goal add "shared goal" --idea 12 --idea 7    # linked to two ideas at once (--idea is repeatable)
 idea goal list --json                            # today's due goals + completion
 idea goal done 5                                  # mark goal #5 done for today
 idea goal undo 5                                  # unmark it
 idea goal stop 5                                  # stop a recurring goal (keeps history)
 idea goal remove 5                                # delete a goal and its history
-idea goal link 5 12                               # link existing goal #5 to idea #12
-idea goal unlink 5                                # remove goal #5's idea link
+idea goal link 5 12                               # add a link from goal #5 to idea #12 (on top of any it has)
+idea goal unlink 5 12                             # remove just that one link
 idea goal streak --json                           # current streak, longest, lifetime xp
+idea goal history --json                          # completed goals: the progress archive
 ```
+
+A goal can link to more than one idea at once -- `link`/`unlink` each act
+on exactly one (goal, idea) pair, never "the" link, since there may be
+several. A goal's JSON always carries `idea_ids` (a plain list) and
+`ideas` (the same, resolved to `{"id", "text"}` pairs).
+
+A goal is "completed" once there's nothing left due about it: a one-off
+completes the moment its target date is marked done; a recurring goal only
+completes by being `stop`ped -- marking days done doesn't complete it on its
+own, since it stays due again next matching weekday until stopped. `idea
+show <id>` also lists that idea's linked goals now (current and completed
+both), so an idea's progress toward it is visible from the same command
+that shows its text/notes/fields.
 
 `--weekdays` also accepts `weekdays` (Mon-Fri) and `weekends` (Sat-Sun) as
 shorthands. `--weekdays` and `--date` are mutually exclusive on one goal.
-A goal doesn't need its idea to exist first -- add the goal, capture the
+A goal doesn't need its idea(s) to exist first -- add the goal, capture an
 idea whenever, then `goal link` them.
 
-Linking works from the GUI too now (a select on each goal row, plus an
-optional one at add-time) — this CLI command is just the scriptable/agent
-path to the same `dbutil.link_goal`/`unlink_goal` operations.
+Linking works from the GUI too now (chips on each goal row -- current or
+completed -- plus a chip picker at add-time, both supporting more than one
+idea per goal) — this CLI command is just the scriptable/agent path to the
+same `dbutil.link_goal`/`unlink_goal` operations.
 
 Streak math: an unfinished *today* doesn't break the streak (it's just not
 counted yet), and a day with nothing due at all is skipped rather than

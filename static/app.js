@@ -56,6 +56,46 @@ themeToggle.addEventListener("click", () => {
 
 loadTheme();
 
+// ---- style: terminal / horizon / notebook, three selectable visual
+// identities cycled by their own top-bar toggle and persisted in
+// localStorage, mirroring the theme toggle above exactly. See style.css's
+// "style" block for what each one actually changes (the --display
+// typeface plus a couple of structural flourishes -- never the dark/light
+// color tokens, so every style still works in both themes). Pure
+// GUI/localStorage state, no CLI equivalent -- same exception as theme. ----
+const STYLE_ORDER = ["terminal", "horizon", "notebook"];
+const STYLE_STORAGE_KEY = "idea-bank-style";
+const styleToggle = document.getElementById("style-toggle");
+const styleToggleLabel = document.getElementById("style-toggle-label");
+
+function applyStyle(style) {
+  document.documentElement.dataset.style = style;
+  styleToggleLabel.textContent = `style: ${style}`;
+}
+
+function loadStyle() {
+  let stored = null;
+  try {
+    stored = localStorage.getItem(STYLE_STORAGE_KEY);
+  } catch {
+    // localStorage unavailable (private browsing, etc.) -- just the default below
+  }
+  applyStyle(STYLE_ORDER.includes(stored) ? stored : "terminal");
+}
+
+styleToggle.addEventListener("click", () => {
+  const current = document.documentElement.dataset.style || "terminal";
+  const next = STYLE_ORDER[(STYLE_ORDER.indexOf(current) + 1) % STYLE_ORDER.length];
+  applyStyle(next);
+  try {
+    localStorage.setItem(STYLE_STORAGE_KEY, next);
+  } catch {
+    // won't persist across reloads, but the click still applies visually
+  }
+});
+
+loadStyle();
+
 function relativeTime(dbTimestamp) {
   const date = new Date(dbTimestamp.replace(" ", "T"));
   const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
@@ -284,21 +324,66 @@ async function fetchIdeas() {
   if (focusId === null && flatOrder.length > 0) {
     selectCard(flatOrder[0]);
   }
-  populateIdeaSelect(goalAddIdea, goalAddIdea.value);
-  if (currentScreen === "goals") renderGoalsPanel(); // refresh goal rows' idea-link selects
+  renderGoalAddIdeaChips();
+  if (currentScreen === "goals") renderGoalsPanel(); // refresh goal rows' idea-link chips
 }
 
-// Shared by the goal-add form's idea-link select and each goal row's --
-// keeps the truncation and "no linked idea" placeholder in one place.
-function populateIdeaSelect(select, currentValue) {
-  select.innerHTML = '<option value="">no linked idea</option>';
+// Shared idea-linking widget: a chip per already-linked idea (label + a
+// remove ×) plus a "+ link idea" dropdown to add another -- a goal can
+// link to more than one idea, so this is always a set, never a single
+// select. Used by the goal-add form (local state, goal doesn't exist yet)
+// and every goal row -- current or completed alike, since a past/completed
+// goal should be linkable too, not just an active one -- which call the
+// link/unlink API immediately instead via onAdd/onRemove. onJump is
+// omitted for the add-form (nothing to jump to yet).
+function buildIdeaChipsRow(linkedIdeas, { onAdd, onRemove, onJump }) {
+  const wrap = document.createElement("div");
+  wrap.className = "goal-idea-chips";
+
+  for (const idea of linkedIdeas) {
+    const chip = document.createElement("span");
+    chip.className = "goal-idea-chip";
+
+    const label = document.createElement(onJump ? "button" : "span");
+    label.className = "goal-idea-chip-label";
+    label.textContent = idea.text.length <= 30 ? idea.text : idea.text.slice(0, 27) + "...";
+    label.title = idea.text;
+    if (onJump) {
+      label.type = "button";
+      label.title = "jump to this idea on the board";
+      label.addEventListener("click", () => onJump(idea.id));
+    }
+    chip.appendChild(label);
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "goal-idea-chip-remove";
+    removeBtn.textContent = "×";
+    removeBtn.title = "unlink this idea";
+    removeBtn.addEventListener("click", () => onRemove(idea.id));
+    chip.appendChild(removeBtn);
+
+    wrap.appendChild(chip);
+  }
+
+  const linkedIds = new Set(linkedIdeas.map((i) => i.id));
+  const addSelect = document.createElement("select");
+  addSelect.className = "goal-idea-add-select";
+  addSelect.innerHTML = '<option value="">+ link idea</option>';
   for (const idea of ideas) {
+    if (linkedIds.has(idea.id)) continue;
     const opt = document.createElement("option");
     opt.value = idea.id;
     opt.textContent = idea.text.length <= 40 ? idea.text : idea.text.slice(0, 37) + "...";
-    select.appendChild(opt);
+    addSelect.appendChild(opt);
   }
-  select.value = currentValue ?? "";
+  addSelect.addEventListener("change", () => {
+    if (!addSelect.value) return;
+    onAdd(Number(addSelect.value));
+  });
+  wrap.appendChild(addSelect);
+
+  return wrap;
 }
 
 // ---- goals screen: its own full screen, not a side panel -- see
@@ -307,7 +392,28 @@ function populateIdeaSelect(select, currentValue) {
 const goalsBadge = document.getElementById("goals-badge");
 const goalAddForm = document.getElementById("goal-add-form");
 const goalAddText = document.getElementById("goal-add-text");
-const goalAddIdea = document.getElementById("goal-add-idea");
+const goalAddIdeaChipsEl = document.getElementById("goal-add-idea-chips");
+let goalAddIdeaIds = new Set();
+
+function renderGoalAddIdeaChips() {
+  goalAddIdeaChipsEl.innerHTML = "";
+  const linkedIdeas = [...goalAddIdeaIds]
+    .map((id) => ideas.find((i) => i.id === id))
+    .filter(Boolean);
+  goalAddIdeaChipsEl.appendChild(
+    buildIdeaChipsRow(linkedIdeas, {
+      onAdd: (ideaId) => {
+        goalAddIdeaIds.add(ideaId);
+        renderGoalAddIdeaChips();
+      },
+      onRemove: (ideaId) => {
+        goalAddIdeaIds.delete(ideaId);
+        renderGoalAddIdeaChips();
+      },
+    })
+  );
+}
+
 const goalListEl = document.getElementById("goal-list");
 const goalWeekdayPills = document.querySelectorAll(".goal-weekday-pill");
 const goalAddDate = document.getElementById("goal-add-date");
@@ -315,14 +421,18 @@ const goalDateSmartDefaultInput = document.getElementById("goal-date-smart-defau
 const goalDateCutoffHourInput = document.getElementById("goal-date-cutoff-hour");
 let selectedGoalWeekdays = new Set();
 
+let completedGoals = [];
+
 async function fetchGoalsData() {
-  const [goalsRes, streakRes] = await Promise.all([
+  const [goalsRes, streakRes, completedRes] = await Promise.all([
     fetch("/api/goals"),
     fetch("/api/goals/streak"),
+    fetch("/api/goals/completed"),
   ]);
   const goalsPayload = await goalsRes.json();
   todaysGoals = goalsPayload.goals;
   streakInfo = await streakRes.json();
+  completedGoals = await completedRes.json();
   renderGoalsBadge();
   if (currentScreen === "goals") renderGoalsPanel();
 }
@@ -419,6 +529,72 @@ function renderGoalsPanel() {
   for (const goal of todaysGoals) {
     goalListEl.appendChild(buildGoalRow(goal));
   }
+
+  renderGoalHistory();
+}
+
+const goalHistoryListEl = document.getElementById("goal-history-list");
+
+function renderGoalHistory() {
+  goalHistoryListEl.innerHTML = "";
+  if (completedGoals.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "goals-empty-hint";
+    hint.textContent = "nothing completed yet -- it'll show up here once you do";
+    goalHistoryListEl.appendChild(hint);
+    return;
+  }
+  for (const goal of completedGoals) {
+    goalHistoryListEl.appendChild(buildGoalHistoryRow(goal));
+  }
+}
+
+function buildGoalHistoryRow(goal) {
+  const row = document.createElement("div");
+  row.className = "goal-history-row";
+
+  const text = document.createElement("div");
+  text.className = "goal-history-text";
+  text.textContent = goal.text;
+  row.appendChild(text);
+
+  const meta = document.createElement("div");
+  meta.className = "goal-history-meta";
+
+  const tag = document.createElement("span");
+  tag.className = "goal-tag";
+  tag.textContent = formatWeekdays(goal.weekdays);
+  meta.appendChild(tag);
+
+  const countTag = document.createElement("span");
+  countTag.className = "goal-tag";
+  countTag.textContent = `${goal.times_completed}x`;
+  meta.appendChild(countTag);
+
+  const when = goal.last_completed || goal.archived_at;
+  if (when) {
+    const whenTag = document.createElement("span");
+    whenTag.className = "goal-tag";
+    whenTag.textContent = when;
+    meta.appendChild(whenTag);
+  }
+
+  row.appendChild(meta);
+
+  // Completed goals stay linkable too -- a past goal is still valid
+  // evidence of progress toward an idea you only later decided it served.
+  row.appendChild(
+    buildIdeaChipsRow(goal.ideas, {
+      onAdd: (ideaId) => linkGoalToIdea(goal.id, ideaId),
+      onRemove: (ideaId) => unlinkGoalFromIdea(goal.id, ideaId),
+      onJump: (ideaId) => {
+        showScreen("board");
+        selectCard(ideaId);
+      },
+    })
+  );
+
+  return row;
 }
 
 const WEEKDAY_DISPLAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -458,35 +634,16 @@ function buildGoalRow(goal) {
   recurTag.textContent = formatWeekdays(goal.weekdays);
   meta.appendChild(recurTag);
 
-  const linkedIdea = goal.idea_id ? ideas.find((i) => i.id === goal.idea_id) : null;
-
-  const ideaWrap = document.createElement("div");
-  ideaWrap.className = "goal-row-idea";
-
-  const ideaSelect = document.createElement("select");
-  ideaSelect.className = "goal-row-idea-select";
-  populateIdeaSelect(ideaSelect, goal.idea_id ?? "");
-  ideaSelect.addEventListener("change", () => {
-    const value = ideaSelect.value;
-    if (value) linkGoalToIdea(goal.id, Number(value));
-    else unlinkGoalFromIdea(goal.id);
-  });
-  ideaWrap.appendChild(ideaSelect);
-
-  if (linkedIdea) {
-    ideaSelect.classList.add("linked");
-    const jumpBtn = document.createElement("button");
-    jumpBtn.type = "button";
-    jumpBtn.className = "goal-idea-jump";
-    jumpBtn.textContent = "↗";
-    jumpBtn.title = "jump to this idea on the board";
-    jumpBtn.addEventListener("click", () => {
-      showScreen("board");
-      selectCard(linkedIdea.id);
-    });
-    ideaWrap.appendChild(jumpBtn);
-  }
-  meta.appendChild(ideaWrap);
+  meta.appendChild(
+    buildIdeaChipsRow(goal.ideas, {
+      onAdd: (ideaId) => linkGoalToIdea(goal.id, ideaId),
+      onRemove: (ideaId) => unlinkGoalFromIdea(goal.id, ideaId),
+      onJump: (ideaId) => {
+        showScreen("board");
+        selectCard(ideaId);
+      },
+    })
+  );
   body.appendChild(meta);
 
   const actions = document.createElement("div");
@@ -541,8 +698,12 @@ async function linkGoalToIdea(goalId, ideaId) {
   await fetchGoalsData();
 }
 
-async function unlinkGoalFromIdea(goalId) {
-  await fetch(`/api/goals/${goalId}/unlink`, { method: "POST" });
+async function unlinkGoalFromIdea(goalId, ideaId) {
+  await fetch(`/api/goals/${goalId}/unlink`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ idea_id: ideaId }),
+  });
   await fetchGoalsData();
 }
 
@@ -551,10 +712,9 @@ goalAddForm.addEventListener("submit", async (e) => {
   const text = goalAddText.value.trim();
   if (!text) return;
   const weekdays = [...selectedGoalWeekdays];
-  const payload = { text };
+  const payload = { text, idea_ids: [...goalAddIdeaIds] };
   if (weekdays.length > 0) payload.weekdays = weekdays;
   else if (goalAddDate.value) payload.target_date = goalAddDate.value;
-  if (goalAddIdea.value) payload.idea_id = Number(goalAddIdea.value);
 
   const res = await fetch("/api/goals", {
     method: "POST",
@@ -567,7 +727,8 @@ goalAddForm.addEventListener("submit", async (e) => {
   selectedGoalWeekdays.clear();
   goalWeekdayPills.forEach((p) => p.classList.remove("selected"));
   goalAddDate.value = "";
-  goalAddIdea.value = "";
+  goalAddIdeaIds.clear();
+  renderGoalAddIdeaChips();
   updateGoalAddDateVisibility(); // refills with a fresh smart default for the next add
   await fetchGoalsData();
   goalAddText.focus();
@@ -592,7 +753,7 @@ function showScreen(name) {
     tab.setAttribute("aria-selected", String(active));
   });
   if (name === "goals") {
-    populateIdeaSelect(goalAddIdea, goalAddIdea.value);
+    renderGoalAddIdeaChips();
     renderGoalsPanel();
     updateGoalAddDateVisibility();
   }
@@ -818,6 +979,7 @@ const modalBackdrop = document.getElementById("modal-backdrop");
 const modalStatusPills = document.getElementById("modal-status-pills");
 const modalTextEl = document.getElementById("modal-text");
 const modalFieldsEl = document.getElementById("modal-fields");
+const modalGoalsEl = document.getElementById("modal-goals");
 const modalNotesEl = document.getElementById("modal-notes");
 const modalMetaEl = document.getElementById("modal-meta");
 
@@ -839,8 +1001,70 @@ function openModal(id) {
     notes: idea.notes || "",
   };
   renderModal(idea);
+  modalGoalsEl.innerHTML = ""; // clear the previous idea's goals while the fetch below is in flight
+  renderModalGoals(id);
   modalBackdrop.hidden = false;
   requestAnimationFrame(() => modalTextEl.focus());
+}
+
+// Goals linked to this idea, split into "current" and "completed" groups --
+// current gets the app's gold accent (same as an active idea/goal), completed
+// gets teal + a strikethrough, mirroring how a completed goal row already
+// reads on the goals screen.
+async function renderModalGoals(ideaId) {
+  const res = await fetch(`/api/ideas/${ideaId}/goals`);
+  if (!res.ok || modalIdeaId !== ideaId) return; // modal moved on while this was in flight
+  const goals = await res.json();
+  if (modalIdeaId !== ideaId) return;
+
+  modalGoalsEl.innerHTML = "";
+  if (goals.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "modal-goals-empty";
+    hint.textContent = "no goals linked to this idea yet";
+    modalGoalsEl.appendChild(hint);
+    return;
+  }
+
+  const current = goals.filter((g) => !g.completed);
+  const completed = goals.filter((g) => g.completed);
+  if (current.length) modalGoalsEl.appendChild(buildModalGoalGroup("current", current, false));
+  if (completed.length) modalGoalsEl.appendChild(buildModalGoalGroup("completed", completed, true));
+}
+
+function buildModalGoalGroup(label, goals, completed) {
+  const group = document.createElement("div");
+  group.className = "modal-goal-group";
+
+  const labelEl = document.createElement("div");
+  labelEl.className = "modal-goal-group-label";
+  labelEl.textContent = label;
+  group.appendChild(labelEl);
+
+  for (const goal of goals) {
+    const row = document.createElement("div");
+    row.className = "modal-goal-row" + (completed ? " completed" : "");
+
+    const text = document.createElement("span");
+    text.className = "modal-goal-text";
+    text.textContent = goal.text;
+    row.appendChild(text);
+
+    const tag = document.createElement("span");
+    tag.className = "goal-tag";
+    tag.textContent = formatWeekdays(goal.weekdays);
+    row.appendChild(tag);
+
+    if (completed && goal.times_completed) {
+      const count = document.createElement("span");
+      count.className = "goal-tag";
+      count.textContent = `${goal.times_completed}x`;
+      row.appendChild(count);
+    }
+
+    group.appendChild(row);
+  }
+  return group;
 }
 
 function renderModal(idea) {
@@ -872,6 +1096,7 @@ function renderModalFields() {
     row.className = "field-row";
 
     const keyInput = document.createElement("input");
+    keyInput.className = "field-key";
     keyInput.type = "text";
     keyInput.placeholder = "key";
     keyInput.value = key;
@@ -879,7 +1104,12 @@ function renderModalFields() {
       modalPending.fields[index][0] = keyInput.value;
     });
 
+    const sep = document.createElement("span");
+    sep.className = "field-sep";
+    sep.textContent = ":";
+
     const valueInput = document.createElement("input");
+    valueInput.className = "field-value";
     valueInput.type = "text";
     valueInput.placeholder = "value";
     valueInput.value = value;
@@ -897,6 +1127,7 @@ function renderModalFields() {
     });
 
     row.appendChild(keyInput);
+    row.appendChild(sep);
     row.appendChild(valueInput);
     row.appendChild(removeBtn);
     modalFieldsEl.appendChild(row);
@@ -1072,6 +1303,20 @@ setInterval(() => {
     if (idea && timeEl) timeEl.textContent = relativeTime(idea.updated_at);
   });
 }, 30000);
+
+// ---- auto-refresh: re-pull ideas/goals periodically so a window left open
+// a while (e.g. the desktop launcher's dedicated window) doesn't drift from
+// changes made elsewhere -- another window, or the CLI. Skips the ideas
+// half while a card is being inline-edited (editingId set), since fetchIdeas
+// -> render() would rebuild that card's textarea from server data and wipe
+// out whatever's been typed but not yet committed; the goals screen has no
+// equivalent in-place-edit state, so it always refreshes. Pure GUI polling,
+// nothing to script against -- the same exception as the theme toggle. ----
+const AUTO_REFRESH_INTERVAL_MS = 90000;
+setInterval(() => {
+  if (editingId === null) fetchIdeas();
+  fetchGoalsData();
+}, AUTO_REFRESH_INTERVAL_MS);
 
 showScreen("goals");
 fetchIdeas();

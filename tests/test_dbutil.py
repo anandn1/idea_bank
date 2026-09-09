@@ -322,7 +322,7 @@ def test_create_goal_one_off_defaults_target_date_to_today(conn):
     goal = dbutil.create_goal(conn, "x")
     assert goal["target_date"] == dbutil.today_str()
     assert goal["weekdays"] is None
-    assert goal["idea_id"] is None
+    assert goal["idea_ids"] == []
 
 
 def test_create_goal_weekdays_ignores_target_date(conn):
@@ -346,12 +346,29 @@ def test_create_goal_empty_weekdays_list_is_one_off(conn):
 
 def test_create_goal_with_idea_link(conn):
     idea_id = dbutil.add_idea("run every day")
-    goal = dbutil.create_goal(conn, "walk 10000 steps", idea_id=idea_id, weekdays=[0])
-    assert goal["idea_id"] == idea_id
+    goal = dbutil.create_goal(
+        conn, "walk 10000 steps", idea_ids=[idea_id], weekdays=[0]
+    )
+    assert goal["idea_ids"] == [idea_id]
+
+
+def test_create_goal_with_multiple_idea_links(conn):
+    idea_a = dbutil.add_idea("idea A")
+    idea_b = dbutil.add_idea("idea B")
+    goal = dbutil.create_goal(conn, "shared goal", idea_ids=[idea_b, idea_a])
+    assert goal["idea_ids"] == sorted([idea_a, idea_b])
+    assert {i["id"] for i in goal["ideas"]} == {idea_a, idea_b}
 
 
 def test_create_goal_missing_idea_returns_none(conn):
-    assert dbutil.create_goal(conn, "x", idea_id=9999) is None
+    assert dbutil.create_goal(conn, "x", idea_ids=[9999]) is None
+
+
+def test_create_goal_missing_idea_among_several_returns_none(conn):
+    idea_id = dbutil.add_idea("real idea")
+    assert dbutil.create_goal(conn, "x", idea_ids=[idea_id, 9999]) is None
+    # nothing partially created -- the goal shouldn't exist at all
+    assert dbutil.goals_for_idea(conn, idea_id) == []
 
 
 def test_missing_goal_ids(conn):
@@ -436,31 +453,51 @@ def test_remove_goal_missing_returns_false(conn):
 
 def test_unlink_goals_from_idea(conn):
     idea_id = dbutil.add_idea("run every day")
-    goal = dbutil.create_goal(conn, "walk 10000 steps", idea_id=idea_id)
+    goal = dbutil.create_goal(conn, "walk 10000 steps", idea_ids=[idea_id])
 
     dbutil.unlink_goals_from_idea(conn, idea_id)
     conn.commit()
 
     refreshed = dbutil.get_goal(conn, goal["id"])
     assert refreshed is not None
-    assert refreshed["idea_id"] is None
+    assert refreshed["idea_ids"] == []
 
 
-def test_link_goal_sets_idea_id(conn):
+def test_unlink_goals_from_idea_only_removes_that_ones_link(conn):
+    idea_a = dbutil.add_idea("idea a")
+    idea_b = dbutil.add_idea("idea b")
+    goal = dbutil.create_goal(conn, "x", idea_ids=[idea_a, idea_b])
+
+    dbutil.unlink_goals_from_idea(conn, idea_a)
+    conn.commit()
+
+    refreshed = dbutil.get_goal(conn, goal["id"])
+    assert refreshed["idea_ids"] == [idea_b]
+
+
+def test_link_goal_adds_idea_id(conn):
     goal = dbutil.create_goal(conn, "walk 10000 steps")  # no idea yet
     idea_id = dbutil.add_idea("run every day")
 
     linked = dbutil.link_goal(conn, goal["id"], idea_id)
-    assert linked["idea_id"] == idea_id
+    assert linked["idea_ids"] == [idea_id]
 
 
-def test_link_goal_can_change_an_existing_link(conn):
+def test_link_goal_adds_a_second_idea_without_removing_the_first(conn):
     idea_a = dbutil.add_idea("idea a")
     idea_b = dbutil.add_idea("idea b")
-    goal = dbutil.create_goal(conn, "x", idea_id=idea_a)
+    goal = dbutil.create_goal(conn, "x", idea_ids=[idea_a])
 
     linked = dbutil.link_goal(conn, goal["id"], idea_b)
-    assert linked["idea_id"] == idea_b
+    assert linked["idea_ids"] == sorted([idea_a, idea_b])
+
+
+def test_link_goal_same_idea_twice_is_a_no_op(conn):
+    idea_id = dbutil.add_idea("idea a")
+    goal = dbutil.create_goal(conn, "x", idea_ids=[idea_id])
+
+    linked = dbutil.link_goal(conn, goal["id"], idea_id)
+    assert linked["idea_ids"] == [idea_id]
 
 
 def test_link_goal_missing_goal_returns_none(conn):
@@ -473,16 +510,26 @@ def test_link_goal_missing_idea_returns_none(conn):
     assert dbutil.link_goal(conn, goal["id"], 9999) is None
 
 
-def test_unlink_goal_clears_idea_id(conn):
+def test_unlink_goal_removes_just_that_link(conn):
+    idea_a = dbutil.add_idea("idea a")
+    idea_b = dbutil.add_idea("idea b")
+    goal = dbutil.create_goal(conn, "x", idea_ids=[idea_a, idea_b])
+
+    unlinked = dbutil.unlink_goal(conn, goal["id"], idea_a)
+    assert unlinked["idea_ids"] == [idea_b]
+
+
+def test_unlink_goal_last_link_leaves_it_empty(conn):
     idea_id = dbutil.add_idea("run every day")
-    goal = dbutil.create_goal(conn, "x", idea_id=idea_id)
+    goal = dbutil.create_goal(conn, "x", idea_ids=[idea_id])
 
-    unlinked = dbutil.unlink_goal(conn, goal["id"])
-    assert unlinked["idea_id"] is None
+    unlinked = dbutil.unlink_goal(conn, goal["id"], idea_id)
+    assert unlinked["idea_ids"] == []
 
 
-def test_unlink_goal_missing_returns_none(conn):
-    assert dbutil.unlink_goal(conn, 9999) is None
+def test_unlink_goal_missing_goal_returns_none(conn):
+    idea_id = dbutil.add_idea("x")
+    assert dbutil.unlink_goal(conn, 9999, idea_id) is None
 
 
 def test_compute_streak_counts_consecutive_complete_days(conn):
@@ -586,3 +633,116 @@ def test_total_xp_counts_completed_goal_days(conn):
     dbutil.set_goal_done(conn, goal_id, "2026-09-02", True)
 
     assert dbutil.total_xp(conn) == 2
+
+
+def test_goals_for_idea_missing_idea_returns_none(conn):
+    assert dbutil.goals_for_idea(conn, 999) is None
+
+
+def test_goals_for_idea_includes_both_current_and_completed(conn):
+    idea_id = dbutil.add_idea("ship the migration")
+    current = dbutil.create_goal(
+        conn, "draft it", idea_ids=[idea_id], target_date="2026-09-01"
+    )
+    done = dbutil.create_goal(
+        conn, "outline it", idea_ids=[idea_id], target_date="2026-08-01"
+    )
+    dbutil.set_goal_done(conn, done["id"], "2026-08-01", True)
+
+    goals = dbutil.goals_for_idea(conn, idea_id)
+
+    by_id = {g["id"]: g for g in goals}
+    assert by_id[current["id"]]["completed"] is False
+    assert by_id[done["id"]]["completed"] is True
+    assert by_id[done["id"]]["times_completed"] == 1
+
+
+def test_goals_for_idea_excludes_goals_linked_to_other_ideas(conn):
+    idea_id = dbutil.add_idea("idea A")
+    other_id = dbutil.add_idea("idea B")
+    dbutil.create_goal(conn, "for A", idea_ids=[idea_id])
+    dbutil.create_goal(conn, "for B", idea_ids=[other_id])
+
+    goals = dbutil.goals_for_idea(conn, idea_id)
+
+    assert [g["text"] for g in goals] == ["for A"]
+
+
+def test_goals_for_idea_includes_a_goal_linked_to_several_ideas(conn):
+    idea_a = dbutil.add_idea("idea A")
+    idea_b = dbutil.add_idea("idea B")
+    goal = dbutil.create_goal(conn, "shared", idea_ids=[idea_a, idea_b])
+
+    goals_a = dbutil.goals_for_idea(conn, idea_a)
+    goals_b = dbutil.goals_for_idea(conn, idea_b)
+
+    assert [g["id"] for g in goals_a] == [goal["id"]]
+    assert [g["id"] for g in goals_b] == [goal["id"]]
+    assert {i["id"] for i in goals_a[0]["ideas"]} == {idea_a, idea_b}
+
+
+def test_completed_goals_includes_one_off_marked_done(conn):
+    goal = dbutil.create_goal(conn, "draft the proposal", target_date="2026-08-01")
+    dbutil.set_goal_done(conn, goal["id"], "2026-08-01", True)
+
+    completed = dbutil.completed_goals(conn)
+
+    assert [g["id"] for g in completed] == [goal["id"]]
+    assert completed[0]["completed"] is True
+    assert completed[0]["last_completed"] == "2026-08-01"
+
+
+def test_completed_goals_excludes_undone_one_off(conn):
+    dbutil.create_goal(conn, "not done yet", target_date="2026-08-01")
+    assert dbutil.completed_goals(conn) == []
+
+
+def test_completed_goals_excludes_still_active_recurring_goal(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    dbutil.set_goal_done(
+        conn, goal_id, "2026-09-01", True
+    )  # completing a day isn't the same as stopping
+
+    assert dbutil.completed_goals(conn) == []
+
+
+def test_completed_goals_includes_stopped_recurring_goal(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    dbutil.stop_goal(conn, goal_id)
+
+    completed = dbutil.completed_goals(conn)
+
+    assert [g["id"] for g in completed] == [goal_id]
+    assert completed[0]["completed"] is True
+
+
+def test_completed_goals_includes_idea_text_when_linked(conn):
+    idea_id = dbutil.add_idea("ship the migration")
+    goal = dbutil.create_goal(
+        conn, "draft it", idea_ids=[idea_id], target_date="2026-08-01"
+    )
+    dbutil.set_goal_done(conn, goal["id"], "2026-08-01", True)
+
+    completed = dbutil.completed_goals(conn)
+
+    assert completed[0]["ideas"] == [{"id": idea_id, "text": "ship the migration"}]
+
+
+def test_completed_goals_ideas_is_empty_when_unlinked(conn):
+    goal = dbutil.create_goal(conn, "draft it", target_date="2026-08-01")
+    dbutil.set_goal_done(conn, goal["id"], "2026-08-01", True)
+
+    completed = dbutil.completed_goals(conn)
+
+    assert completed[0]["ideas"] == []
+
+
+def test_completed_goals_most_recently_completed_first(conn):
+    older = dbutil.create_goal(conn, "older", target_date="2026-08-01")
+    dbutil.set_goal_done(conn, older["id"], "2026-08-01", True)
+    newer = dbutil.create_goal(conn, "newer", target_date="2026-08-15")
+    dbutil.set_goal_done(conn, newer["id"], "2026-08-15", True)
+
+    completed = dbutil.completed_goals(conn)
+
+    assert [g["id"] for g in completed] == [newer["id"], older["id"]]
