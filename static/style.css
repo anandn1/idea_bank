@@ -1,87 +1,85 @@
+/* ---- fonts: JetBrains Mono, self-hosted (static/fonts/) rather than a
+   webfont CDN -- this app declares "no external network calls" as an
+   architecture invariant in AGENTS.md, so the four weight files were
+   fetched once during development and now ship with the app like any
+   other static asset. One committed monospace family carries every role
+   (display, body, data) -- a terminal doesn't reach for a second face for
+   headlines; hierarchy comes from weight/size/spacing instead. ---- */
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("fonts/jetbrains-mono-800.woff2") format("woff2");
+}
+
 /* ---- theme ----
-   Dark is the base palette (this app's original identity); [data-theme]
-   is set by app.js from a top-bar toggle (dark / light / system), cycled
-   and persisted in localStorage. "system" leaves the attribute off
-   entirely and falls back to prefers-color-scheme below, so a light
-   override only applies when it's actually chosen. Accent hues (gold/
-   teal/red) keep the same identity in both palettes, just re-tuned for
-   contrast against a light ground instead of a dark one. */
+   A terminal-block, neubrutalist identity: thick flat borders, zero
+   radius, zero blur -- no gradients, no glow, no soft/translucent accent
+   borders. Six named colors total (paper/paper-dim/ink/flame/cobalt/moss),
+   used by role, not decoration: flame = active/primary/destructive,
+   cobalt = queued-horizon-frontier/idea-links, moss = archive/done/
+   completed. Light is the base palette (paper ground, ink text/borders);
+   dark inverts consistently. [data-theme] set by the top-bar toggle
+   (dark/light/system), same mechanism as before. */
 
 :root {
-  --bg: #14171c;
-  --panel: #1c2028;
-  --text: #e7e4dd;
-  --text-dim: #8f9198;
-  --border: rgba(231, 228, 221, 0.09);
-  --border-strong: rgba(231, 228, 221, 0.18);
-  --gold: #c9a15b;
-  --teal: #5c8b85;
-  --red: #b0645a;
-  --surface-selected: #262b35;
-  --surface-hover: #20242c;
-  --gold-glow: rgba(201, 161, 91, 0.06);
-  --gold-border-soft: rgba(201, 161, 91, 0.4);
-  --teal-border-soft: rgba(92, 139, 133, 0.55);
+  --paper: #efeee6;
+  --paper-dim: #e2e0d2;
+  --ink: #14140f;
+  --ink-dim: #5b5a4e;
+  --flame: #cf3a08;
+  --cobalt: #1741c4;
+  --moss: #2f5a22;
 
-  --sans: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
-  --display: var(--mono);
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
 }
 
-/* ---- style: three selectable visual identities (terminal / horizon /
-   notebook), cycled by their own top-bar toggle and persisted in
-   localStorage, exactly like the theme toggle above. Each only touches
-   typography (--display, used for the wordmark/stat numbers/column
-   headers) plus a couple of structural flourishes on the existing markup --
-   never the dark/light color tokens, so every style still works in both
-   themes. All three are system font stacks: this app declares "no external
-   network calls" in AGENTS.md, so no webfont CDN. Default (no data-style
-   attribute) is "terminal". Pure GUI/localStorage state, same
-   nothing-to-script-against exception as the theme toggle -- no CLI
-   equivalent. ---- */
-
-:root[data-style="horizon"] {
-  --display: Georgia, "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
-}
-
-:root[data-style="notebook"] {
-  --display: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-}
-
-:root[data-theme="light"] {
-  --bg: #f1ece3;
-  --panel: #e8e1d3;
-  --text: #2a251e;
-  --text-dim: #7a7266;
-  --border: rgba(42, 37, 30, 0.1);
-  --border-strong: rgba(42, 37, 30, 0.22);
-  --gold: #93672a;
-  --teal: #3c645f;
-  --red: #8a4238;
-  --surface-selected: #ded4bf;
-  --surface-hover: #e4dac6;
-  --gold-glow: rgba(147, 103, 42, 0.08);
-  --gold-border-soft: rgba(147, 103, 42, 0.45);
-  --teal-border-soft: rgba(60, 100, 95, 0.55);
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]):not([data-theme="light"]) {
-    --bg: #f1ece3;
-    --panel: #e8e1d3;
-    --text: #2a251e;
-    --text-dim: #7a7266;
-    --border: rgba(42, 37, 30, 0.1);
-    --border-strong: rgba(42, 37, 30, 0.22);
-    --gold: #93672a;
-    --teal: #3c645f;
-    --red: #8a4238;
-    --surface-selected: #ded4bf;
-    --surface-hover: #e4dac6;
-    --gold-glow: rgba(147, 103, 42, 0.08);
-    --gold-border-soft: rgba(147, 103, 42, 0.45);
-    --teal-border-soft: rgba(60, 100, 95, 0.55);
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #14140f;
+    --paper-dim: #201f17;
+    --ink: #efeee6;
+    --ink-dim: #a6a392;
+    --flame: #ff8552;
+    --cobalt: #7d9aff;
+    --moss: #7fce62;
   }
+}
+
+:root[data-theme="dark"] {
+  --paper: #14140f;
+  --paper-dim: #201f17;
+  --ink: #efeee6;
+  --ink-dim: #a6a392;
+  --flame: #ff8552;
+  --cobalt: #7d9aff;
+  --moss: #7fce62;
 }
 
 * {
@@ -92,9 +90,10 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 
 body {
@@ -108,110 +107,142 @@ body {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  row-gap: 8px;
-  gap: 16px;
+  row-gap: 10px;
+  gap: 20px;
   padding: 14px 20px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border-strong);
+  background: var(--paper);
+  border-bottom: 3px solid var(--ink);
   flex-shrink: 0;
 }
 
-/* wordmark set in --display, not the UI font: this app's whole reason for
-   existing is `idea "text"` at a shell prompt, so the one deliberate
-   flourish echoes that -- in the terminal style, --display *is* the mono
-   command-line face; horizon/notebook reinterpret the same flourish in
-   their own display serif instead. */
 .brand {
-  font-family: var(--display);
+  font-weight: 800;
   font-size: 15px;
-  letter-spacing: -0.02em;
-  color: var(--gold);
+  letter-spacing: -0.01em;
+  color: var(--ink);
   flex-shrink: 0;
 }
 
 .brand .prompt {
-  color: var(--text-dim);
+  color: var(--flame);
 }
 
+/* bracket-style toggle used by status pills, weekday pills, and idea
+   status pills -- an unselected pill is just outlined text; selected
+   fills flat with the status's own accent, never a glow. */
 .target-pill {
   font-family: var(--mono);
+  font-weight: 700;
   font-size: 11px;
-  padding: 4px 9px;
-  border-radius: 3px;
-  border: 1px solid var(--border-strong);
+  padding: 3px 8px;
+  border-radius: 0;
+  border: 1.5px solid var(--ink-dim);
   background: transparent;
-  color: var(--text-dim);
+  color: var(--ink-dim);
   cursor: pointer;
 }
 
-.target-pill.selected {
-  color: var(--text);
-  background: var(--surface-selected);
+.target-pill:hover {
+  border-color: var(--ink);
+  color: var(--ink);
 }
 
-.target-pill[data-status="active"].selected { color: var(--gold); border-color: var(--gold); }
+.target-pill.selected {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.target-pill[data-status="active"].selected { background: var(--flame); border-color: var(--flame); }
 .target-pill[data-status="queued"].selected,
 .target-pill[data-status="horizon"].selected,
-.target-pill[data-status="frontier"].selected { color: var(--teal); border-color: var(--teal); }
-.target-pill[data-status="archive"].selected { color: var(--red); border-color: var(--red); }
+.target-pill[data-status="frontier"].selected { background: var(--cobalt); border-color: var(--cobalt); }
+.target-pill[data-status="archive"].selected { background: var(--moss); border-color: var(--moss); }
 
 /* ---- screen tabs: switch between the goals screen and the board screen.
-   theme-toggle shares the same plain mono status-button look. ---- */
+   Rendered as literal bracketed text, [goals] [ideas], not pill chrome. ---- */
 
 .screen-tabs {
   display: flex;
-  gap: 4px;
+  gap: 14px;
   flex-shrink: 0;
 }
 
-.screen-tab,
-.theme-toggle,
-.style-toggle {
+.screen-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink-dim);
+  background: transparent;
+  border: none;
+  padding: 2px 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.screen-tab::before { content: "["; color: var(--ink-dim); }
+.screen-tab::after { content: "]"; color: var(--ink-dim); }
+
+.screen-tab:hover {
+  color: var(--ink);
+}
+
+.screen-tab.selected {
+  color: var(--ink);
+}
+
+.screen-tab.selected::before,
+.screen-tab.selected::after {
+  color: var(--flame);
+}
+
+.theme-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--text-dim);
+  font-weight: 600;
+  color: var(--ink-dim);
   background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: 3px;
+  border: 1.5px solid var(--ink-dim);
+  border-radius: 0;
   padding: 4px 10px;
   flex-shrink: 0;
   cursor: pointer;
   white-space: nowrap;
 }
 
-.screen-tab:hover,
-.theme-toggle:hover,
-.style-toggle:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
-}
-
-.screen-tab.selected {
-  color: var(--gold);
-  border-color: var(--gold);
+.theme-toggle:hover {
+  color: var(--ink);
+  border-color: var(--ink);
 }
 
 .goals-badge {
-  color: var(--text-dim);
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
+  color: var(--ink-dim);
+  border: 1.5px solid var(--ink-dim);
+  border-radius: 0;
   padding: 0px 5px;
+  font-weight: 700;
 }
 
 .goals-badge.complete {
-  color: var(--gold);
-  border-color: var(--gold);
+  color: var(--paper);
+  background: var(--moss);
+  border-color: var(--moss);
 }
 
 .mode-indicator {
   font-family: var(--mono);
+  font-weight: 700;
   font-size: 11px;
-  color: var(--gold);
-  border: 1px solid var(--gold);
-  border-radius: 3px;
+  color: var(--paper);
+  background: var(--flame);
+  border: 1.5px solid var(--flame);
+  border-radius: 0;
   padding: 3px 9px;
   white-space: nowrap;
   flex-shrink: 0;
@@ -224,22 +255,21 @@ body {
 .help {
   display: flex;
   gap: 14px;
-  font-size: 12px;
-  color: var(--text-dim);
+  font-size: 11px;
+  color: var(--ink-dim);
   flex-shrink: 0;
   white-space: nowrap;
 }
 
 .help b {
   font-family: var(--mono);
-  color: var(--text);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 1px 5px;
-  margin-right: 4px;
-  font-weight: 500;
+  color: var(--ink);
+  font-weight: 700;
+  margin-right: 3px;
 }
+
+.help b::before { content: "["; color: var(--ink-dim); font-weight: 500; }
+.help b::after { content: "]"; color: var(--ink-dim); font-weight: 500; }
 
 /* ---- screens: goals and board are full-screen sibling sections, switched
    by the top-bar tabs (or g/i) -- goals is the default on load. ---- */
@@ -262,42 +292,41 @@ body {
   display: none;
 }
 
-/* ---- idea-add box: a labeled GUI form (not a bare command-prompt input)
-   sitting above the board, since capturing a new idea is a first-class GUI
-   action, not just a CLI one. ---- */
+/* ---- idea-add box: a labeled GUI form sitting above the board. ---- */
 
 .idea-add-box {
   flex-shrink: 0;
-  padding: 14px 16px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
+  padding: 16px 18px;
+  background: var(--paper);
+  border-bottom: 3px solid var(--ink);
 }
 
 .idea-add-form {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
 }
 
 .idea-add-label {
   font-family: var(--mono);
+  font-weight: 700;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
 }
 
 #idea-add-text {
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-family: var(--sans);
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  color: var(--ink);
+  font-family: var(--mono);
   font-size: 13px;
   padding: 7px 9px;
-  border-radius: 3px;
   outline: none;
 }
 
 #idea-add-text:focus {
-  border-color: var(--gold);
+  border-color: var(--flame);
 }
 
 .idea-add-status-row {
@@ -310,20 +339,27 @@ body {
 .idea-add-status {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 5px;
 }
 
 .idea-add-submit {
-  background: transparent;
-  border: 1px solid var(--gold);
-  color: var(--gold);
+  font-family: var(--mono);
+  font-weight: 800;
+  background: var(--ink);
+  border: 2px solid var(--ink);
+  color: var(--paper);
   font-size: 12px;
-  padding: 5px 12px;
-  border-radius: 3px;
+  padding: 6px 14px;
+  border-radius: 0;
   cursor: pointer;
   flex-shrink: 0;
   margin-left: auto;
+  box-shadow: 3px 3px 0 var(--flame);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
 }
+
+.idea-add-submit:hover { transform: translate(1.5px, 1.5px); box-shadow: 1.5px 1.5px 0 var(--flame); }
+.idea-add-submit:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--flame); }
 
 /* ---- board ---- */
 
@@ -337,8 +373,8 @@ body {
 .column {
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
-  padding: 16px 12px;
+  border-right: 3px solid var(--ink);
+  padding: 0 13px 16px;
   height: 100%;
   min-height: 0;
   overflow-y: auto;
@@ -348,36 +384,37 @@ body {
   border-right: none;
 }
 
+.column-bar {
+  height: 5px;
+  margin: 0 -13px 14px;
+  background: var(--ink-dim);
+}
+
+.column[data-status="active"] .column-bar { background: var(--flame); }
+.column[data-status="queued"] .column-bar,
+.column[data-status="horizon"] .column-bar { background: var(--cobalt); }
+.column[data-status="frontier"] .column-bar { background: var(--cobalt); opacity: 0.5; }
+.column[data-status="archive"] .column-bar { background: var(--moss); }
+
 .column-title {
-  margin: 0 0 12px 2px;
-  font-family: var(--display);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-dim);
+  margin: 0 0 12px 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
   letter-spacing: 0.01em;
 }
 
-.column[data-status="active"] .column-title { color: var(--gold); }
-.column[data-status="queued"] .column-title { color: var(--teal); }
-.column[data-status="horizon"] .column-title { color: var(--teal); }
-.column[data-status="frontier"] .column-title { color: var(--teal); opacity: 0.7; }
-.column[data-status="archive"] .column-title { color: var(--red); }
-
-/* horizon's signature: the board itself reads as a landscape -- each
-   status a little further off than the last, inbox sharp and near,
-   frontier soft and far, echoing the app's own "horizon"/"frontier"
-   vocabulary instead of decorating it with something unrelated. */
-:root[data-style="horizon"] .column[data-status="inbox"] .column-title { opacity: 1; }
-:root[data-style="horizon"] .column[data-status="active"] .column-title { opacity: 0.95; }
-:root[data-style="horizon"] .column[data-status="queued"] .column-title { opacity: 0.85; letter-spacing: 0.02em; }
-:root[data-style="horizon"] .column[data-status="horizon"] .column-title { opacity: 0.72; letter-spacing: 0.03em; }
-:root[data-style="horizon"] .column[data-status="frontier"] .column-title { opacity: 0.55; letter-spacing: 0.05em; }
-:root[data-style="horizon"] .column[data-status="archive"] .column-title { opacity: 0.9; }
+.column-title::before {
+  content: "## ";
+  color: var(--ink-dim);
+  font-weight: 500;
+}
 
 .cards {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   flex: 1;
   /* fills all remaining column height even when empty/short, so the
      whole column is a valid drop target, not just the area its cards
@@ -388,29 +425,21 @@ body {
 /* ---- cards ---- */
 
 .card {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-left: 2px solid transparent;
-  border-radius: 3px;
-  padding: 10px 12px;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  padding: 10px 11px;
   cursor: pointer;
   text-align: left;
 }
 
-.card[data-status="active"] { border-left-color: var(--gold); }
-.card[data-status="queued"] { border-left-color: var(--teal); }
-.card[data-status="horizon"] { border-left-color: var(--teal); }
-.card[data-status="frontier"] { border-left-color: var(--teal-border-soft); }
-.card[data-status="archive"] { border-left-color: var(--red); }
-
 .card.selected {
-  border-color: var(--gold);
-  background: var(--surface-selected);
+  border-color: var(--flame);
+  border-width: 2.5px;
 }
 
 .card.in-range {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
+  background: var(--paper-dim);
 }
 
 .card[draggable="true"] {
@@ -422,15 +451,16 @@ body {
 }
 
 .cards.drag-over {
-  background: var(--gold-glow);
-  outline: 1px dashed var(--border-strong);
-  outline-offset: -4px;
+  background: var(--paper-dim);
+  outline: 2px dashed var(--flame);
+  outline-offset: -6px;
 }
 
 .card-text {
-  font-size: 13.5px;
+  font-size: 13px;
+  font-weight: 600;
   line-height: 1.4;
-  color: var(--text);
+  color: var(--ink);
   margin-bottom: 8px;
   word-wrap: break-word;
   white-space: pre-wrap;
@@ -438,13 +468,13 @@ body {
 
 .card-edit {
   width: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--sans);
-  font-size: 13.5px;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
   line-height: 1.4;
-  border: 1px solid var(--gold);
-  border-radius: 3px;
+  border: 2px solid var(--flame);
+  border-radius: 0;
   padding: 6px 8px;
   resize: vertical;
   min-height: 4em;
@@ -461,9 +491,10 @@ body {
 .field-pill {
   font-family: var(--mono);
   font-size: 10px;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 2px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  border: 1.5px solid var(--paper-dim);
+  border-radius: 0;
   padding: 1px 5px;
 }
 
@@ -472,31 +503,34 @@ body {
   justify-content: space-between;
   align-items: center;
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--text-dim);
+  font-size: 10.5px;
+  color: var(--ink-dim);
 }
 
 .card-status-tag {
   font-family: var(--mono);
+  font-weight: 700;
   font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 2px;
-  border: 1px solid var(--border-strong);
 }
 
-.card[data-status="inbox"] .card-status-tag { color: var(--text-dim); }
-.card[data-status="active"] .card-status-tag { color: var(--gold); border-color: var(--gold); }
-.card[data-status="queued"] .card-status-tag { color: var(--teal); border-color: var(--teal); }
-.card[data-status="horizon"] .card-status-tag { color: var(--teal); border-color: var(--teal); }
-.card[data-status="frontier"] .card-status-tag { color: var(--teal); border-color: var(--teal-border-soft); }
-.card[data-status="archive"] .card-status-tag { color: var(--red); border-color: var(--red); }
+.card-status-tag::before { content: "["; }
+.card-status-tag::after { content: "]"; }
+
+.card[data-status="inbox"] .card-status-tag { color: var(--ink-dim); }
+.card[data-status="active"] .card-status-tag { color: var(--flame); }
+.card[data-status="queued"] .card-status-tag,
+.card[data-status="horizon"] .card-status-tag { color: var(--cobalt); }
+.card[data-status="frontier"] .card-status-tag { color: var(--cobalt); opacity: 0.6; }
+.card[data-status="archive"] .card-status-tag { color: var(--moss); }
 
 .empty-hint {
   font-size: 12px;
-  color: var(--text-dim);
-  opacity: 0.5;
+  color: var(--ink-dim);
+  opacity: 0.6;
   padding: 4px 2px;
 }
+
+.empty-hint::before { content: "— "; }
 
 /* the one deliberate motion moment -- a card sliding into place when it
    changes column -- is driven from app.js via the FLIP technique. It
@@ -504,119 +538,112 @@ body {
    so no motion-related rule is needed in this stylesheet. */
 
 /* ---- goals screen: the default landing screen, full-width instead of a
-   cramped side drawer -- reached via the top-bar tab (or 'g'), switching
-   is instant, no transition, same as the rest of this app's restrained
-   motion budget (the FLIP card slide is still the only deliberate one). ---- */
+   cramped side drawer -- reached via the top-bar tab (or 'g'). ---- */
 
 .goals-screen {
   overflow-y: auto;
   align-items: center;
-  padding: 24px 20px;
+  padding: 28px 20px 60px;
 }
 
 .goals-screen-inner {
-  max-width: 640px;
+  max-width: 660px;
   width: 100%;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 34px;
 }
 
-/* notebook's signature: faint ruled-paper lines behind the whole goals
-   screen, purely a background image -- never touches border/color
-   properties, so it can't collide with any status-accent border rule. */
-:root[data-style="notebook"] .goals-screen-inner {
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent,
-    transparent 27px,
-    var(--border) 28px
-  );
+/* command-block convention: a small dim "$ idea ..." line above a block's
+   own content, tying the GUI back to the CLI that actually does the work.
+   Shared by the streak readout and the add-goal form. */
+.cmd-line {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  margin-bottom: 10px;
+}
+
+.cmd-line .sym {
+  color: var(--flame);
+  margin-right: 4px;
+}
+
+.stats-block,
+.add-block {
+  border: 3px solid var(--ink);
+  padding: 16px 18px;
 }
 
 .goals-stats {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 16px;
-  font-family: var(--display);
-  font-size: 21px;
-  font-weight: 700;
+  gap: 22px;
+  font-family: var(--mono);
+  font-size: 26px;
+  font-weight: 800;
   letter-spacing: -0.01em;
-  color: var(--text-dim);
-  padding: 10px 2px;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+}
+
+.goals-stats span {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-dim);
 }
 
 .goals-stats .active {
-  color: var(--gold);
-}
-
-/* horizon: the stat line sits in a soft gold gradient band instead of
-   between hairline rules -- a dashboard readout, not a ledger line. */
-:root[data-style="horizon"] .goals-stats {
-  border: none;
-  border-radius: 4px;
-  padding: 16px 12px;
-  background: linear-gradient(180deg, transparent, var(--gold-glow));
-}
-
-/* notebook: a heading rule under the stat line, doubled like a ledger
-   total -- paired with the ruled-paper background on the whole screen
-   below (see .goals-screen-inner). */
-:root[data-style="notebook"] .goals-stats {
-  border: none;
-  border-bottom: 3px double var(--border-strong);
-  padding-bottom: 12px;
+  color: var(--flame);
 }
 
 .goal-add-form {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border);
 }
 
 .goal-add-form input[type="text"] {
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-family: var(--sans);
-  font-size: 13px;
-  padding: 7px 9px;
-  border-radius: 3px;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 15px;
+  padding: 8px 10px;
   outline: none;
 }
 
 .goal-add-form input[type="text"]:focus {
-  border-color: var(--gold);
+  border-color: var(--flame);
 }
 
 .goal-add-weekdays {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 5px;
+  margin-top: 4px;
 }
 
 .goal-add-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  margin-top: 6px;
 }
 
 .goal-add-row input[type="date"] {
   flex: 1;
   min-width: 0;
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
-  font-family: var(--sans);
+  background: var(--paper);
+  border: 1.5px solid var(--ink-dim);
+  border-radius: 0;
+  color: var(--ink);
+  font-family: var(--mono);
   font-size: 12px;
   padding: 5px 6px;
-  border-radius: 3px;
 }
 
 .goal-add-row input[type="date"][hidden] {
@@ -628,12 +655,14 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  margin-top: 10px;
 }
 
 .goal-add-idea-label {
   font-family: var(--mono);
+  font-weight: 700;
   font-size: 10px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
   flex-shrink: 0;
 }
 
@@ -641,12 +670,10 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   font-family: var(--mono);
   font-size: 10px;
-  color: var(--text-dim);
-  padding-bottom: 14px;
-  border-bottom: 1px solid var(--border);
+  color: var(--ink-dim);
 }
 
 .goal-date-settings label {
@@ -658,52 +685,84 @@ body {
 
 .goal-date-settings input[type="number"] {
   width: 34px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 2px;
+  background: var(--paper);
+  border: 1.5px solid var(--ink-dim);
+  border-radius: 0;
+  color: var(--ink);
   padding: 1px 3px;
   font-family: var(--mono);
   font-size: 10px;
+  /* the native up/down spinner otherwise eats most of a 34px-wide field,
+     clipping the two digits it's meant to show */
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.goal-date-settings input[type="number"]::-webkit-inner-spin-button,
+.goal-date-settings input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 .goal-add-submit {
-  background: transparent;
-  border: 1px solid var(--gold);
-  color: var(--gold);
-  font-size: 12px;
-  padding: 5px 12px;
-  border-radius: 3px;
+  font-family: var(--mono);
+  font-weight: 800;
+  background: var(--ink);
+  border: 2px solid var(--ink);
+  color: var(--paper);
+  font-size: 13px;
+  padding: 7px 16px;
+  border-radius: 0;
   cursor: pointer;
   flex-shrink: 0;
+  box-shadow: 3px 3px 0 var(--flame);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
 }
+
+.goal-add-submit:hover { transform: translate(1.5px, 1.5px); box-shadow: 1.5px 1.5px 0 var(--flame); }
+.goal-add-submit:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--flame); }
 
 .goal-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .goal-row {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: 3px;
+  gap: 12px;
+  padding: 14px 4px;
+  border-bottom: 1.5px solid var(--paper-dim);
+}
+
+.goal-row:first-child {
+  border-top: 1.5px solid var(--paper-dim);
 }
 
 .goal-row.done {
-  border-color: var(--gold-border-soft);
+  opacity: 0.85;
 }
 
 .goal-check {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  margin-top: 1px;
+  font-family: var(--mono);
+  font-weight: 800;
+  font-size: 14px;
+  background: none;
+  border: none;
+  color: var(--ink-dim);
   cursor: pointer;
-  accent-color: var(--gold);
+  width: 30px;
+  flex-shrink: 0;
+  text-align: left;
+  white-space: nowrap;
+  align-self: flex-start;
+}
+
+.goal-check:hover {
+  color: var(--ink);
+}
+
+.goal-check.done {
+  color: var(--moss);
 }
 
 .goal-row-body {
@@ -712,30 +771,33 @@ body {
 }
 
 .goal-row-text {
-  font-size: 13px;
-  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
   word-wrap: break-word;
 }
 
 .goal-row.done .goal-row-text {
-  color: var(--text-dim);
+  color: var(--ink-dim);
   text-decoration: line-through;
+  text-decoration-thickness: 2px;
 }
 
 .goal-row-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 5px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
 }
 
 .goal-tag {
   font-family: var(--mono);
-  font-size: 10px;
-  color: var(--text-dim);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  padding: 1px 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  border: 1.5px solid var(--paper-dim);
+  padding: 2px 6px;
 }
 
 /* ---- idea-linking chips: shared by the goal-add form (local state) and
@@ -749,25 +811,23 @@ body {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
 }
 
 .goal-idea-chip {
   display: flex;
   align-items: center;
-  gap: 2px;
-  border: 1px solid var(--teal);
-  border-radius: 2px;
-  overflow: hidden;
+  border: 1.5px solid var(--cobalt);
 }
 
 .goal-idea-chip-label {
   font-family: var(--mono);
-  font-size: 10px;
-  color: var(--teal);
+  font-weight: 600;
+  font-size: 10.5px;
+  color: var(--cobalt);
   background: transparent;
   border: none;
-  padding: 1px 4px;
+  padding: 2px 5px;
   max-width: 140px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -775,118 +835,154 @@ body {
   cursor: default;
 }
 
+.goal-idea-chip-label::before {
+  content: "#";
+  opacity: 0.6;
+}
+
 button.goal-idea-chip-label {
   cursor: pointer;
 }
 
 button.goal-idea-chip-label:hover {
-  background: var(--surface-hover);
+  background: var(--paper-dim);
 }
 
 .goal-idea-chip-remove {
   font-family: var(--mono);
-  font-size: 10px;
-  color: var(--text-dim);
+  font-weight: 700;
+  font-size: 10.5px;
+  color: var(--ink-dim);
   background: transparent;
   border: none;
-  border-left: 1px solid var(--border);
-  padding: 1px 4px;
+  border-left: 1.5px solid var(--cobalt);
+  padding: 2px 5px;
   cursor: pointer;
   line-height: 1.4;
 }
 
 .goal-idea-chip-remove:hover {
-  color: var(--red);
+  color: var(--paper);
+  background: var(--flame);
 }
 
 .goal-idea-add-select {
   font-family: var(--mono);
-  font-size: 10px;
-  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 10.5px;
+  color: var(--ink-dim);
   background: transparent;
-  border: 1px dashed var(--border-strong);
-  border-radius: 2px;
-  padding: 1px 3px;
+  border: 1.5px dashed var(--ink-dim);
+  padding: 2px 4px;
   max-width: 110px;
 }
 
 .goal-row-actions {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .goal-row-actions button {
+  font-family: var(--mono);
+  font-weight: 700;
   background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
+  border: 1.5px solid var(--ink-dim);
+  color: var(--ink-dim);
   font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 2px;
+  padding: 2px 7px;
   cursor: pointer;
 }
 
 .goal-row-actions button:hover {
-  color: var(--red);
-  border-color: var(--red);
+  color: var(--paper);
+  background: var(--flame);
+  border-color: var(--flame);
 }
 
 .goals-empty-hint {
   font-size: 12px;
-  color: var(--text-dim);
-  opacity: 0.7;
+  color: var(--ink-dim);
+  opacity: 0.8;
 }
 
-/* ---- goal history: completed goals (one-off goals done, recurring goals
-   stopped) -- a visual record of progress, physically separated below the
-   active goal list by its own heading + divider. ---- */
+.goals-empty-hint::before { content: "— "; }
 
+/* ---- goal section: shared wrapper for the current-goal list and the
+   completed/history list -- each headed by a [-]/[+] disclosure button
+   that collapses its own list, independently, state persisted per
+   section in localStorage (same display-only, no-CLI-equivalent category
+   as the theme toggle). ---- */
+
+.goal-section,
 .goal-history {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 6px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+  gap: 10px;
 }
 
-.goal-history-label {
+.section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.section-toggle .mark {
+  color: var(--flame);
+  font-weight: 800;
+}
+
+.section-toggle:hover {
+  color: var(--flame);
+}
+
+.goal-list[hidden],
+.goal-history-list[hidden] {
+  display: none;
 }
 
 .goal-history-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .goal-history-row {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--teal-border-soft);
-  border-radius: 3px;
+  gap: 8px;
+  padding: 12px 4px;
+  border-bottom: 1.5px solid var(--paper-dim);
   opacity: 0.85;
 }
 
+.goal-history-list .goal-history-row:first-child {
+  border-top: 1.5px solid var(--paper-dim);
+}
+
 .goal-history-text {
-  font-size: 12.5px;
-  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink-dim);
   text-decoration: line-through;
+  text-decoration-thickness: 2px;
   word-wrap: break-word;
 }
 
 .goal-history-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
 }
 
 /* ---- detail modal ---- */
@@ -894,7 +990,7 @@ button.goal-idea-chip-label:hover {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(10, 12, 15, 0.7);
+  background: rgba(20, 20, 15, 0.55);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -911,10 +1007,10 @@ button.goal-idea-chip-label:hover {
   max-width: 560px;
   max-height: 85vh;
   overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  padding: 18px 20px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 0;
+  padding: 20px 22px;
 }
 
 .modal-header {
@@ -922,57 +1018,66 @@ button.goal-idea-chip-label:hover {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .modal-status-pills {
   display: flex;
-  gap: 4px;
+  gap: 5px;
   flex-wrap: wrap;
 }
 
 .modal-close {
   background: transparent;
   border: none;
-  color: var(--text-dim);
+  color: var(--ink-dim);
   font-size: 20px;
+  font-weight: 700;
   line-height: 1;
   cursor: pointer;
   padding: 2px 6px;
 }
 
 .modal-close:hover {
-  color: var(--text);
+  color: var(--flame);
 }
 
 .modal-text {
   width: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-weight: 600;
   font-size: 14px;
   line-height: 1.5;
-  border: 1px solid var(--border-strong);
-  border-radius: 3px;
-  padding: 8px 10px;
+  border: 2px solid var(--ink);
+  border-radius: 0;
+  padding: 9px 11px;
   resize: vertical;
   outline: none;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .modal-text:focus {
-  border-color: var(--gold);
+  border-color: var(--flame);
 }
 
 .modal-section {
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .modal-section-label {
   font-family: var(--mono);
+  font-weight: 700;
   font-size: 11px;
-  color: var(--text-dim);
-  margin-bottom: 6px;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+
+.modal-section-label::before {
+  content: "# ";
+  color: var(--ink-dim);
+  font-weight: 500;
 }
 
 .field-row {
@@ -984,32 +1089,35 @@ button.goal-idea-chip-label:hover {
 
 .field-row input {
   min-width: 0;
-  background: var(--bg);
-  border: 1px solid var(--border-strong);
-  color: var(--text);
+  background: var(--paper);
+  border: 1.5px solid var(--ink-dim);
+  border-radius: 0;
+  color: var(--ink);
   font-family: var(--mono);
   font-size: 12px;
   padding: 5px 8px;
-  border-radius: 3px;
   outline: none;
 }
 
 .field-row input:focus {
-  border-color: var(--gold);
+  border-color: var(--flame);
 }
 
-/* key : value, not two identical anonymous boxes -- a narrower gold-toned
+/* key : value, not two identical anonymous boxes -- a narrower flame-toned
    key input, a visible colon, and a wider value input so the row reads as
    one structured pair instead of two unrelated fields. */
 .field-row .field-key {
   flex: 0 1 30%;
-  color: var(--gold);
+  color: var(--flame);
+  border-color: var(--flame);
+  font-weight: 700;
 }
 
 .field-row .field-sep {
   flex-shrink: 0;
-  color: var(--text-dim);
+  color: var(--ink-dim);
   font-family: var(--mono);
+  font-weight: 700;
   font-size: 12px;
 }
 
@@ -1020,55 +1128,57 @@ button.goal-idea-chip-label:hover {
 .field-row-remove {
   flex-shrink: 0;
   width: 28px;
+  font-family: var(--mono);
+  font-weight: 700;
   background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  border-radius: 3px;
+  border: 1.5px solid var(--ink-dim);
+  color: var(--ink-dim);
   cursor: pointer;
 }
 
 .field-row-remove:hover {
-  border-color: var(--red);
-  color: var(--red);
+  color: var(--paper);
+  background: var(--flame);
+  border-color: var(--flame);
 }
 
 .modal-add-field {
-  background: transparent;
-  border: 1px dashed var(--border-strong);
-  color: var(--text-dim);
   font-family: var(--mono);
+  font-weight: 600;
+  background: transparent;
+  border: 1.5px dashed var(--ink-dim);
+  color: var(--ink-dim);
   font-size: 11px;
   padding: 4px 10px;
-  border-radius: 3px;
   cursor: pointer;
 }
 
 .modal-add-field:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
+  color: var(--ink);
+  border-color: var(--ink);
 }
 
 /* ---- modal goals: everything linked to this idea, split into "current"
-   (gold, matches an active idea/goal's accent) and "completed" (teal +
-   struck-through, matches a done goal-history row) -- both color and a
-   physical group boundary distinguish them, per the goals-linking design. */
+   (plain ink border) and "completed" (moss border + struck-through) --
+   both color and a physical group boundary distinguish them. ---- */
 
 .modal-goals {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .modal-goal-group {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
 }
 
 .modal-goal-group-label {
   font-family: var(--mono);
+  font-weight: 700;
   font-size: 10px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1078,22 +1188,22 @@ button.goal-idea-chip-label:hover {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-left: 2px solid var(--gold);
-  border-radius: 3px;
+  padding: 7px 9px;
+  border: 1.5px solid var(--ink);
   font-size: 12.5px;
-  color: var(--text);
+  font-weight: 600;
+  color: var(--ink);
 }
 
 .modal-goal-row.completed {
-  border-left-color: var(--teal-border-soft);
-  opacity: 0.75;
+  border-color: var(--moss);
+  opacity: 0.8;
 }
 
 .modal-goal-row.completed .modal-goal-text {
-  color: var(--text-dim);
+  color: var(--ink-dim);
   text-decoration: line-through;
+  text-decoration-thickness: 2px;
 }
 
 .modal-goal-text {
@@ -1104,33 +1214,35 @@ button.goal-idea-chip-label:hover {
 
 .modal-goals-empty {
   font-size: 12px;
-  color: var(--text-dim);
-  opacity: 0.7;
+  color: var(--ink-dim);
+  opacity: 0.8;
 }
+
+.modal-goals-empty::before { content: "— "; }
 
 .modal-notes {
   width: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--mono);
   font-size: 13px;
   line-height: 1.5;
-  border: 1px solid var(--border-strong);
-  border-radius: 3px;
+  border: 1.5px solid var(--ink-dim);
+  border-radius: 0;
   padding: 8px 10px;
   resize: vertical;
   outline: none;
 }
 
 .modal-notes:focus {
-  border-color: var(--gold);
+  border-color: var(--flame);
 }
 
 .modal-meta {
   font-family: var(--mono);
   font-size: 11px;
-  color: var(--text-dim);
-  margin-bottom: 16px;
+  color: var(--ink-dim);
+  margin-bottom: 18px;
 }
 
 .modal-footer {
@@ -1146,39 +1258,52 @@ button.goal-idea-chip-label:hover {
 }
 
 .modal-popout {
+  font-family: var(--mono);
+  font-weight: 600;
   background: transparent;
-  border: 1px solid var(--border-strong);
-  color: var(--text-dim);
+  border: 1.5px solid var(--ink-dim);
+  color: var(--ink-dim);
   font-size: 12px;
   padding: 6px 12px;
-  border-radius: 3px;
   cursor: pointer;
 }
 
 .modal-popout:hover {
-  color: var(--text);
-  border-color: var(--text-dim);
+  color: var(--ink);
+  border-color: var(--ink);
 }
 
 .modal-delete {
+  font-family: var(--mono);
+  font-weight: 700;
   background: transparent;
-  border: 1px solid var(--red);
-  color: var(--red);
+  border: 1.5px solid var(--flame);
+  color: var(--flame);
   font-size: 12px;
   padding: 6px 12px;
-  border-radius: 3px;
   cursor: pointer;
 }
 
-.modal-done {
-  background: transparent;
-  border: 1px solid var(--gold);
-  color: var(--gold);
-  font-size: 12px;
-  padding: 6px 14px;
-  border-radius: 3px;
-  cursor: pointer;
+.modal-delete:hover {
+  color: var(--paper);
+  background: var(--flame);
 }
+
+.modal-done {
+  font-family: var(--mono);
+  font-weight: 800;
+  background: var(--ink);
+  border: 2px solid var(--ink);
+  color: var(--paper);
+  font-size: 12px;
+  padding: 7px 16px;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 var(--flame);
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+
+.modal-done:hover { transform: translate(1.5px, 1.5px); box-shadow: 1.5px 1.5px 0 var(--flame); }
+.modal-done:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--flame); }
 
 /* ---- standalone idea window (idea.html): the modal's own markup, popped
    out into a real window instead of an in-board overlay -- so it's just
@@ -1196,5 +1321,13 @@ body.standalone-idea .modal {
 
 .standalone-notice {
   font-size: 13px;
-  color: var(--text-dim);
+  color: var(--ink-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .idea-add-submit,
+  .goal-add-submit,
+  .modal-done {
+    transition: none;
+  }
 }

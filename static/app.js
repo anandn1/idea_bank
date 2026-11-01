@@ -56,46 +56,6 @@ themeToggle.addEventListener("click", () => {
 
 loadTheme();
 
-// ---- style: terminal / horizon / notebook, three selectable visual
-// identities cycled by their own top-bar toggle and persisted in
-// localStorage, mirroring the theme toggle above exactly. See style.css's
-// "style" block for what each one actually changes (the --display
-// typeface plus a couple of structural flourishes -- never the dark/light
-// color tokens, so every style still works in both themes). Pure
-// GUI/localStorage state, no CLI equivalent -- same exception as theme. ----
-const STYLE_ORDER = ["terminal", "horizon", "notebook"];
-const STYLE_STORAGE_KEY = "idea-bank-style";
-const styleToggle = document.getElementById("style-toggle");
-const styleToggleLabel = document.getElementById("style-toggle-label");
-
-function applyStyle(style) {
-  document.documentElement.dataset.style = style;
-  styleToggleLabel.textContent = `style: ${style}`;
-}
-
-function loadStyle() {
-  let stored = null;
-  try {
-    stored = localStorage.getItem(STYLE_STORAGE_KEY);
-  } catch {
-    // localStorage unavailable (private browsing, etc.) -- just the default below
-  }
-  applyStyle(STYLE_ORDER.includes(stored) ? stored : "terminal");
-}
-
-styleToggle.addEventListener("click", () => {
-  const current = document.documentElement.dataset.style || "terminal";
-  const next = STYLE_ORDER[(STYLE_ORDER.indexOf(current) + 1) % STYLE_ORDER.length];
-  applyStyle(next);
-  try {
-    localStorage.setItem(STYLE_STORAGE_KEY, next);
-  } catch {
-    // won't persist across reloads, but the click still applies visually
-  }
-});
-
-loadStyle();
-
 function relativeTime(dbTimestamp) {
   const date = new Date(dbTimestamp.replace(" ", "T"));
   const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
@@ -535,6 +495,43 @@ function renderGoalsPanel() {
 
 const goalHistoryListEl = document.getElementById("goal-history-list");
 
+// ---- section disclosure: the current-goal list and the completed list
+// each collapse independently via their own [-]/[+] header button, state
+// persisted per section in localStorage -- pure display state, same
+// no-CLI-equivalent exception as the theme toggle. ----
+
+function wireSectionToggle(toggleId, listEl, storageKey) {
+  const toggle = document.getElementById(toggleId);
+  const mark = toggle.querySelector(".mark");
+
+  function apply(collapsed) {
+    listEl.hidden = collapsed;
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    mark.textContent = collapsed ? "[+]" : "[-]";
+  }
+
+  let stored = null;
+  try {
+    stored = localStorage.getItem(storageKey);
+  } catch {
+    // localStorage unavailable (private browsing, etc.) -- just start expanded
+  }
+  apply(stored === "1");
+
+  toggle.addEventListener("click", () => {
+    const collapsed = !listEl.hidden;
+    apply(collapsed);
+    try {
+      localStorage.setItem(storageKey, collapsed ? "1" : "0");
+    } catch {
+      // won't persist across reloads, but the click still applies visually
+    }
+  });
+}
+
+wireSectionToggle("goal-list-toggle", goalListEl, "idea-bank-goal-list-collapsed");
+wireSectionToggle("goal-history-toggle", goalHistoryListEl, "idea-bank-goal-history-collapsed");
+
 function renderGoalHistory() {
   goalHistoryListEl.innerHTML = "";
   if (completedGoals.length === 0) {
@@ -612,11 +609,12 @@ function buildGoalRow(goal) {
   const row = document.createElement("div");
   row.className = "goal-row" + (goal.completed_at ? " done" : "");
 
-  const check = document.createElement("input");
-  check.type = "checkbox";
-  check.className = "goal-check";
-  check.checked = Boolean(goal.completed_at);
-  check.addEventListener("change", () => setGoalDone(goal.id, check.checked));
+  const check = document.createElement("button");
+  check.type = "button";
+  check.className = "goal-check" + (goal.completed_at ? " done" : "");
+  check.textContent = goal.completed_at ? "[x]" : "[ ]";
+  check.setAttribute("aria-pressed", String(Boolean(goal.completed_at)));
+  check.addEventListener("click", () => setGoalDone(goal.id, !goal.completed_at));
 
   const body = document.createElement("div");
   body.className = "goal-row-body";

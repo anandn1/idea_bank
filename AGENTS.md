@@ -27,7 +27,9 @@ frontend framework, no external network calls.
   non-stdlib dependency (`cryptography`) if it's not on the system path.
 - **`static/`** — vanilla HTML/CSS/JS, no build step, no framework.
   `index.html` is the board; `idea.html` is a standalone pop-out idea
-  editor, opened from the board's detail modal.
+  editor, opened from the board's detail modal; `fonts/` holds the
+  self-hosted JetBrains Mono weight files (see rule 5) — the GUI's only
+  typeface, referenced by `style.css`'s `@font-face` rules.
 - **`scripts/`** — `migrate.py` (one-time/re-runnable import from the old
   `~/ideas/` system, strictly read-only against it) and `expire.py` (the
   queued → archive sweep, run by a systemd timer).
@@ -42,9 +44,10 @@ frontend framework, no external network calls.
    a goal to one or more ideas, browse completed-goal history — the CLI can
    do, and vice versa. Both ultimately call the same `dbutil.py` operations, and the
    JSON API mirrors the CLI's `--json` output shape. **Display-only GUI
-   features have no CLI equivalent** (the theme toggle, the visual-style
-   toggle, the smart-default-date cutoff, the auto-refresh interval, the
-   pop-out window, the desktop launcher) — there's no data behind them to
+   features have no CLI equivalent** (the theme toggle, the
+   smart-default-date cutoff, the auto-refresh interval, the collapsible
+   current/completed goal sections, the pop-out window, the desktop
+   launcher) — there's no data behind them to
    script against. That's the only exception. When you add a capability to
    one surface, add it to the other in the same change unless it's purely
    cosmetic like the ones above — don't invent a new data-carrying
@@ -74,6 +77,14 @@ frontend framework, no external network calls.
    runs automatically inside `get_conn()`, so every entry point (server,
    CLI, scripts) self-heals on its first connection; there's no separate
    manual migration step to remember to run.
+5. **No external network calls from the running app.** Restated here
+   because it's easy to violate by accident, not just on purpose — a
+   webfont `<link>`, a CDN script, an analytics snippet. This is a local,
+   single-user tool; nothing it does at runtime should depend on the
+   network being up. When a resource like a font is genuinely worth
+   using, fetch it once during development and bundle it under `static/`
+   instead (see `static/fonts/`) — the constraint is about the deployed
+   app's behavior, not about what tooling touches while building it.
 
 ## Conventions
 

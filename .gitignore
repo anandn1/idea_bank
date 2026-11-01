@@ -8,5 +8,17 @@ data/*.db-shm
 data/*.log
 .pytest_cache/
 
-# project instructions for Claude Code -- kept local, not shared via the repo
+# Agent/assistant configs & skills
+.claude/
 CLAUDE.md
+
+# Session logs, personal notes, transcripts
+s.md
+*.txt
+.system_generated/
+brain/
+
+# OS / Editor artifacts
+.DS_Store
+.vscode/
+.idea/

@@ -1,559 +1,149 @@
-# idea-bank-v2
+# Idea Bank
 
-A local, keyboard-first replacement for the old `~/ideas/` capture system:
-Python (Flask) + SQLite backend, single-page HTML/CSS/JS GUI, all served on
-`localhost` only. No sign-in, no external network calls.
+A local-first, keyboard-centric productivity system for tracking ideas and daily goals. Built with Python (Flask) + SQLite on the backend, paired with a vanilla HTML/CSS/JS frontend styled with a minimal terminal aesthetic.
 
-The old system under `~/ideas/` (inbox.md, expire.sh, active/queued/archive/horizon,
-idea-triage.timer, idea-horizon-review.timer) is **untouched** — see
-[Confirmation: ~/ideas/ was left alone](#confirmation-ideas-was-left-alone) below,
-including one accidental write during development that's disclosed there.
+Runs completely on `localhost` with zero external network requests, no accounts, and client-side encrypted storage at rest.
 
-## Running it
+---
 
-```
-cd ~/idea_bank
+## Highlights
+
+- **Dual-surface operation**: A powerful CLI (`idea`) and an uncluttered single-page web GUI (`localhost:8420`) that share the exact same SQLite database.
+- **Goals & Streaks**: Track one-off and recurring daily/weekly goals with automatic streak calculations and completion archives.
+- **Idea Lifecycle Management**: Six distinct stages (`inbox` &rarr; `active` &rarr; `queued` &rarr; `horizon` &rarr; `frontier` &rarr; `archive`).
+- **Encrypted at Rest**: All idea text, field notes, and goal contents are encrypted using Fernet (AES-128-CBC + HMAC-SHA256) via Python's `cryptography` library. The secret key is stored locally outside the repository at `~/.config/idea-bank/secret.key`.
+- **Keyboard-first & Fast**: Full keyboard navigation (`j`/`k`, `/`, shortcut keys), instant client-side filtering, drag-and-drop board organization, and standalone pop-out windows.
+- **Scriptable & Agent-ready**: Every CLI command supports `--json` for automation and agent tooling.
+
+---
+
+## Installation & Setup
+
+### Prerequisites
+- Python 3.10+ (with SQLite support)
+- Linux desktop (optional, for systemd services and desktop application shortcut)
+
+### Quick Start
+
+Clone the repository and run the setup script:
+
+```bash
+git clone https://github.com/anandn1/idea_bank.git
+cd idea_bank
 ./install.sh
 ```
 
-This creates a venv, installs Flask, symlinks `cli/idea` to `~/.local/bin/idea`,
-installs the new systemd user units (`idea-bank-v2-*`, separate names from the
-old `idea-triage`/`idea-horizon-review` units, which are left alone), and starts
-the server as a persistent user service.
+`install.sh` performs the following automatically:
+1. Creates a Python virtual environment (`.venv/`) and installs dependencies.
+2. Symlinks `cli/idea` into `~/.local/bin/idea` (make sure `~/.local/bin` is in your `$PATH`).
+3. Installs and starts the systemd user service (`idea-bank-v2-server.service`).
+4. Installs the desktop application shortcut (`idea-bank.desktop`).
 
-Open **http://127.0.0.1:8420/** — or click **idea bank** in your application
-menu, which `install.sh` also adds (see **Desktop app** below).
+Open **http://127.0.0.1:8420** in your browser, or launch **Idea Bank** from your application menu.
 
-To run the server by hand instead of via systemd:
+### Manual Server Launch
 
-```
+To run the Flask backend manually without systemd:
+
+```bash
+# Set up venv and install dependencies
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# Start the server on port 8420
 .venv/bin/python server.py
 ```
 
-## Testing
+---
 
+## Command Line Interface (CLI)
+
+The CLI executable `cli/idea` operates directly on the SQLite database without requiring the web server to be running.
+
+### Capturing Ideas
+
+```bash
+idea "Refactor auth middleware"           # Capture to inbox (default)
+idea -q "Read paper on GRPO"              # Capture straight to queued
+idea -a "Build prototype"                 # Capture to active
+idea -H "Start tech podcast"              # Capture to horizon (long-term)
+idea -f "Colonize Mars"                   # Capture to frontier (moonshots)
 ```
-.venv/bin/pip install -r requirements-dev.txt   # adds pytest to the venv
+
+Batch capture from standard input:
+```bash
+printf "Task 1\nTask 2\nTask 3\n" | idea capture --stdin -q
+```
+
+### Managing Ideas
+
+```bash
+idea list                                # List all ideas
+idea list -q                             # List only queued ideas
+idea list --json                         # Output ideas as JSON
+
+idea show 42                             # Inspect idea #42
+idea edit 42 "Updated description"       # Edit text
+idea move 42 active                      # Move to active
+idea move 10 11 12 queued                # Batch move multiple ideas
+idea delete 42                           # Delete an idea
+```
+
+### Structured Fields & Notes
+
+Ideas support arbitrary `key=value` metadata fields:
+```bash
+idea 12 set priority=high due=2026-11-05 owner=alice
+idea 12 rm due
+idea 12 note "Follow up after morning standup"
+```
+
+### Goals & Daily Tracking
+
+```bash
+idea goal list                           # List current active goals
+idea goal "Ship v2 release" --date 2026-11-02       # One-off goal
+idea goal "Morning run" --weekdays mon,wed,fri      # Recurring goal
+idea goal done 1                         # Mark goal #1 done for today
+idea goal undo 1                         # Unmark goal #1
+idea goal stop 2                         # Stop recurring goal #2
+idea goal history                        # View completed goal archive
+idea goal link 1 42                      # Link goal #1 to idea #42
+idea goal unlink 1 42                    # Unlink goal #1 from idea #42
+```
+
+---
+
+## Web Interface
+
+- **Goals Dashboard**: See today's streak, check off daily recurring and one-off targets, add new goals, and collapse active/completed sections.
+- **Kanban Board**: Drag-and-drop ideas across six status columns, batch move or delete cards, and filter cards instantly.
+- **Detail Modal & Pop-out**: Edit text, assign key-value fields, view linked goals, or click **pop out** to open the card in an isolated floating editor window (`static/idea.html`).
+- **Zero-Distraction Aesthetic**: High-contrast, monospace terminal styling utilizing self-hosted JetBrains Mono font weights with light/dark/system themes.
+
+---
+
+## Development & Testing
+
+Run tests with `pytest`:
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
 .venv/bin/pytest
 ```
 
-Covers `dbutil.py`, `cli/idea` (both its pure helpers directly and full
-subprocess invocations asserting on `--json` output and exit codes -- the
-same contract a human or an agent sees), `scripts/expire.py`, and
-`scripts/migrate.py`. Every test runs against an isolated temp SQLite file
-(never `data/ideas.db`) via the `IDEA_BANK_DB_PATH` env var dbutil.py reads
-when set; `migrate.py`'s tests additionally point `OLD_INBOX` at a throwaway
-file, so the suite can never write to or read the real `~/ideas/inbox.md`.
-Not covered yet: `server.py` (the Flask API) and the GUI itself -- those
-were verified manually (curl / Playwright) during development but have no
-automated tests.
+Tests run in complete isolation with mocked databases and throwaway encryption keys (see `tests/conftest.py`), ensuring your local `data/ideas.db` is never modified during test runs.
 
-## How it works end to end
+---
 
-**Capture / query CLI** — `idea` (`cli/idea`, symlinked onto `PATH`) opens
-`data/ideas.db` directly with Python's `sqlite3` module; it does not need the
-Flask server running. Run `idea --help` (or `idea <command> --help`) for full
-usage. It's built for both a human at a keyboard and an AI agent scripting
-against it: every subcommand accepts `--json` for machine-readable output,
-and exit codes are meaningful (`0` success, `1` valid request but the target
-idea didn't exist / was rejected, `2` bad arguments).
+## Architecture & Security
 
-```
-idea "ship the migration"          # capture -> inbox (bare text = capture)
-idea -q "revisit nvim config"      # capture straight -> queued
-idea -a / -H / -f / -x             # ...active / horizon / frontier / archive
-idea --status queued "text"        # long form of the same flags
+- **Encryption at rest**: Content fields (`text`, `notes`, `fields`) are encrypted using Fernet before being written to SQLite. Status flags, IDs, and timestamps remain unencrypted to support fast index queries and constraints.
+- **No external network calls**: The web interface uses self-hosted assets under `static/fonts/` and zero CDNs or telemetry.
+- **CLI/GUI Parity**: Every action available in the GUI is fully supported in the CLI.
 
-idea list                          # all ideas, newest-updated first
-idea list -q                       # only queued
-idea list --json                   # machine-readable, for scripting/agents
+---
 
-idea show 12                       # full detail for one idea
-idea move 12 active --json         # change status, print the updated idea as JSON
-idea edit 12 "new text"            # rewrite text (single idea only)
-idea delete 12                     # delete
+## License
 
-# batch: show / move / delete all take multiple ids
-idea move 12 13 14 active          # move several ideas to active in one call
-idea delete 12 13 14               # delete several ideas in one call
-idea show 12 13 14 --json          # -> JSON array when more than one id is given
-
-# batch capture: one idea per non-empty line of stdin
-printf "idea one\nidea two\n" | idea capture --stdin -q
-```
-
-If any id in a batch `move`/`delete`/`show` doesn't exist, the whole call
-fails (nothing is changed) and reports which id(s) were missing -- so a
-partial id list never leaves things half-moved.
-
-Note: `-h` is reserved for `--help` (argparse's default), which is why the
-horizon shortcut is uppercase `-H` — everywhere else in this project
-(the GUI, this README) horizon is lowercase `h`.
-
-**Statuses** now run six deep, roughly in increasing time horizon:
-`inbox` → `active` → `queued` → `horizon` (medium-term, reviewed quarterly)
-→ `frontier` (very long-term -- a moonshot or a dream, no review cadence)
-→ `archive`. Run `idea --help` for the full description of each.
-
-**Structured fields** — every idea can carry arbitrary `key=value` metadata
-(due dates, priority, owner, a URL, whatever) on top of its text. There's no
-fixed schema: nothing is required, an idea with no fields is indistinguishable
-from before, and the vocabulary of keys is entirely up to you.
-
-```
-idea "book a room" --field due=2026-10-01 --field priority=high
-idea edit 12 --field owner=me          # add/overwrite a field, text unchanged
-idea edit 12 --unset-field owner       # remove a field
-idea show 12                           # prints fields if the idea has any
-idea list                              # a leading `*` marks ideas that have fields
-```
-
-Stored as a JSON object in a `fields` column (`NULL`/`{}` when unused). The
-JSON API accepts/returns the same shape: `POST`/`PATCH .../api/ideas` take an
-optional `"fields": {...}` object (PATCH replaces the whole object when
-given), and every idea in `GET /api/ideas` includes `"fields"`.
-
-**Goals** — a goal is its own thing, with its own text (`"walk 10000 steps"`),
-separate from ideas. Ideas are the long-term objectives; goals are the
-milestones you reach toward one -- so a goal can *optionally* link to an
-idea (`"run 5k"` → the idea `"run every day"`), but plenty of goals won't
-link to anything at all. A goal is either:
-
-- **recurring**, due on whichever day(s) of the week you pick — check all
-  seven for a daily habit, five for weekdays-only, one for a weekly
-  check-in, or any other subset (e.g. Mon/Wed/Fri) for a milestone
-  schedule. Due every matching week from creation until you stop it;
-  history from before you stopped it is kept.
-- **one-off**, due on a single date — any date at all, not just today.
-  Defaults to today if you don't say otherwise.
-
-Completion is always **self-reported** — you check a goal off yourself, in
-the CLI or the GUI. It is never derived from an idea's status, since most
-goals (the steps example) have no status to derive from. History is
-persisted, so there's a real streak (an unfinished today doesn't break it,
-it's just not counted yet, and a day with nothing due — including a day
-that isn't one of a goal's chosen weekdays — is skipped rather than counted
-as a miss) and a lifetime xp count (total completed goal-days, no arbitrary
-point weighting).
-
-```
-idea goal add "walk 10000 steps" --weekdays daily      every day, no idea link
-idea goal add "gym" --weekdays mon,wed,fri               specific weekdays
-idea goal add "draft the proposal" --idea 12 --date 2026-10-01
-                                                           one-off, any date
-idea goal add "shared goal" --idea 12 --idea 7          linked to two ideas at once
-idea goal list                                          show today's due goals
-idea goal done 5                                        mark goal #5 done for today
-idea goal undo 5                                        unmark it
-idea goal stop 5                                        stop a recurring goal (keeps history)
-idea goal remove 5                                      delete a goal and its history
-idea goal link 5 12                                     add a link from goal #5 to idea #12
-idea goal unlink 5 12                                   remove just that one link
-idea goal streak                                        current streak and lifetime xp
-idea goal history                                       completed goals: the progress archive
-idea show 12                                            an idea's detail, including its linked goals
-```
-
-A goal can link to **more than one idea at once** — `--idea` on `goal add` is
-repeatable, and `goal link`/`goal unlink` each act on exactly one
-goal-idea pair, adding or removing that one link without touching any
-others the goal has. There's no "the" linked idea to replace; `goal link`
-never overwrites an existing link, it only ever adds another one alongside
-it.
-
-**Completed goals / progress archive** — a goal is "completed" once there's
-nothing left due about it: a one-off goal completes the moment its single
-target date is marked done, and a recurring goal completes when it's
-`stop`ped (an active daily habit never counts as "completed" just because
-some days were checked off -- it only completes by being stopped, keeping
-its history). `idea goal history` lists every completed goal, newest first,
-with how many times it was ever marked done and, when it's linked, the
-idea's text. `idea show <id>` now also lists that idea's linked goals
-(current and completed both), so an idea's detail view is where its
-progress toward it lives.
-
-A goal doesn't need its idea(s) to exist first -- add the goal, capture an
-idea whenever (CLI or GUI), then `goal link` them; `goal unlink` removes
-one link without touching either record or any of the goal's other links.
-Linking, including to a completed/past goal, works from either surface.
-
-The same thing from the GUI is its own **full screen**, and it's the one you
-land on first — press `g` (or click the `goals` tab in the top bar) to get
-back to it, `i` (or the `ideas` tab) switches to the idea board. Add a goal
-with the day-of-week pills (none selected = one-off, with a date field that
-defaults intelligently: before a configurable cutoff hour it suggests today,
-at/after it suggests tomorrow — matching planning tomorrow's goals before
-closing the laptop for the night; always just a starting point, editable
-either way) and, optionally, a "link idea" dropdown right there at add-time.
-Check items off, `stop`/delete existing ones. The top-bar `goals` tab shows
-a compact `x/y` badge (gold once today's goals are all done). The
-smart-default cutoff (and an option to turn it off entirely) is a
-per-browser preference, not stored in the database -- same as the theme
-toggle, it has no CLI equivalent because there's nothing for it to default
-*for* on the command line, where you always say the date explicitly. Every
-goal row carries a set of idea **chips** -- one per linked idea, each a
-clickable label (jumps to that idea on the board) plus a small `×` to
-unlink just that one -- and a trailing "+ link idea" dropdown (always
-showing only ideas not already linked) to add another. A goal can be
-linked to as many ideas as make sense; there's no single "the" link to
-overwrite.
-
-Below the active goal list, a **completed** section shows the progress
-archive -- every completed goal (see above for what "completed" means),
-each tagged with its recurrence, how many times it was ever marked done,
-when it was last completed, and the same idea chips as an active goal row
--- completed goals stay fully linkable and unlinkable too, not just
-current ones. Opening an idea's detail view (see below) shows the same
-thing scoped to that one idea: every goal linked to it, grouped into
-**current** (gold-accented) and **completed** (teal-accented, struck
-through) -- both a color and a physical group boundary, so progress toward
-an idea is visible at a glance without reading each row's text.
-
-Deleting an idea that a goal links to **unlinks** it rather than deleting the
-goal -- the goal and its history are independent of the idea's lifecycle, so
-they survive (CLI, GUI, and the JSON API `DELETE /api/ideas/<id>` all do
-this).
-
-JSON API: `GET /api/goals?date=` (today's due goals, default today),
-`POST /api/goals {"text": ..., "idea_ids": [...], "weekdays": [0,2,4], "target_date": ...}`
-(`weekdays` is Monday=0..Sunday=6; a non-empty list makes the goal recurring
-and `target_date` doesn't apply, same mutual exclusivity as `--weekdays`/
-`--date` on the CLI; `idea_ids` is a list -- a goal can link to several ideas
-at creation), `PATCH /api/goals/<id> {"completed": true/false, "date": ...}`,
-`POST /api/goals/<id>/stop`, `POST /api/goals/<id>/link {"idea_id": ...}`
-(adds one link, on top of any the goal already has),
-`POST /api/goals/<id>/unlink {"idea_id": ...}` (removes just that one link --
-`idea_id` is required now that a goal can have more than one),
-`DELETE /api/goals/<id>`, `GET /api/goals/streak`,
-`GET /api/goals/completed` (the progress archive, newest-completed first),
-`GET /api/ideas/<id>/goals` (every goal linked to that idea, current and
-completed alike, each carrying a `"completed"` bool and completion stats).
-Every goal payload carries `"idea_ids"` (a plain list of ids) and
-`"ideas"` (the same ids resolved to `{"id", "text"}` pairs, for display).
-
-**GUI** — `server.py` serves `static/index.html` and a small JSON API
-(`GET/POST /api/ideas`, `PATCH/DELETE /api/ideas/<id>`, plus the goals routes
-above) backed by the same SQLite file. `static/app.js` renders two full
-screens -- **goals** (the default) and the **board** (six columns: Inbox,
-Active, Queued, Horizon, Frontier, Archive), switched by a persistent
-top-bar tab pair -- for browsing, moving, editing, and completing what
-already exists, keyboard-first. The board screen opens with a labeled
-"New idea" box (a text field, a status pill group defaulting to `inbox`,
-and an "Add idea" button) above the columns, so capturing works from either
-surface. See **Goals** above for how linking works from the GUI (chips per
-goal row, an at-add-time chip picker, both allowing more than one idea per
-goal) and the CLI/GUI equivalence note in `AGENTS.md` for the reasoning
-behind what little still doesn't carry over between the two surfaces.
-
-- `g` / `i` (or the top-bar tabs) switch between the **goals** and **board**
-  screens — see **Goals** above.
-- `j` / `k` or `↓` / `↑` move the focus between idea cards (flattened across
-  all six columns, left to right) -- on the board screen.
-- `a` / `q` / `h` / `f` / `x` move the focused (or selected, see below)
-  card(s). A single card slides into its new column — the one deliberate
-  motion in the UI, skipped automatically under `prefers-reduced-motion`;
-  moving more than one at once re-renders directly instead, since several
-  simultaneous slides across columns read as noise, not signal.
-- `e` edits the focused card's text in place (Enter saves, Escape cancels,
-  clicking away saves) — the GUI equivalent of `idea edit`.
-- `d` (or Delete/Backspace) deletes the selected card(s), after a confirm
-  prompt — the GUI equivalent of `idea delete`. Cannot be undone.
-- `v` toggles range-select ("visual mode", vim-style): `j`/`k` extend the
-  range from wherever `v` was pressed, a status bar shows the count, and
-  `a`/`q`/`h`/`f`/`x`/`d` then apply to every selected card at once — the GUI
-  equivalent of the CLI's batch `move`/`delete`. `Escape` cancels back to a
-  single selection.
-- **Enter** (or double-click, or drag) opens the focused card's **detail
-  view** — a modal with the full text (editable), status (as pills), every
-  structured field (editable, with an "add field" row, each row reading as
-  `key : value` rather than two anonymous boxes), goals linked to this idea
-  (current vs. completed, see **Goals** above), freeform notes, and a
-  delete button. Typing in the modal never triggers board shortcuts.
-  Closing it (the `×`, "done", or clicking the backdrop) saves everything
-  at once; **Escape discards** instead, matching the inline `e` edit's
-  convention. This is the GUI's full equivalent of `idea show` + `idea edit
-  --field` + `idea edit --unset-field` combined.
-- **Drag and drop**: drag a card onto another column to move it there (same
-  effect as `a`/`q`/`h`/`f`/`x`, mouse-driven). Single-card only — for moving
-  several at once, use `v` + `j`/`k` + a status key instead.
-- Clicking a card selects it (mouse fallback); Shift+click extends a range
-  the same way `v` + `j`/`k` does. Clicking is never required.
-- **Theme**: the `theme: dark` / `theme: light` / `theme: system` button in
-  the top bar cycles between the original dark palette, a light palette
-  (same accent hues, re-tuned for contrast), and "system" (follows your OS's
-  light/dark setting). Persisted in your browser's `localStorage`, so it's
-  per-browser, not stored in the database.
-- **Style**: the `style: terminal` / `style: horizon` / `style: notebook`
-  button next to the theme toggle cycles between three visual identities --
-  independent of dark/light, and combines with either. All three are system
-  font stacks (no webfont CDN, matching this project's no-external-network-calls
-  rule): **terminal** (the default) leans into the app's own `$ idea`
-  command-line identity -- bold monospace stat numbers, a thin ruled status
-  line. **horizon** sets stat numbers and column headers in a serif display
-  face inside a soft gradient band, and fades each board column's title a
-  little further per status (crisp Inbox, soft Frontier), echoing the
-  status names' own near-to-far vocabulary instead of decorating it with
-  something unrelated. **notebook** sets the same display text in a warmer
-  serif, doubles the rule under the stat line like a ledger total, and adds
-  faint ruled-paper lines behind the whole goals screen. Persisted in
-  `localStorage`, same per-browser, no-CLI-equivalent exception as theme.
-- **Pop out an idea**: the detail modal's "pop out" button opens the same
-  idea in a separate browser window (`static/idea.html`) — the full editor
-  (text, status, fields, notes), not squeezed into the board's modal, useful
-  for keeping one idea open full-size alongside the board. Saving ("done")
-  or deleting it closes that window and the change shows up on the board the
-  next time it re-fetches.
-
-**Expiry** — `scripts/expire.py` is the server-side replacement for the old
-`expire.sh`. It finds every idea with `status='queued'` whose `updated_at` is
-more than 8 weeks old and flips it to `status='archive'`, logging each move to
-stdout and to `data/expire.log`. It's run weekly by
-`idea-bank-v2-triage.service`, which then opens the GUI in your default
-browser via `xdg-open`.
-
-**Quarterly review** — `idea-bank-v2-horizon-review.timer` fires quarterly and
-opens `http://127.0.0.1:8420/#horizon`, which scrolls the Horizon column into
-view; if `xdg-open` isn't available it falls back to `notify-send`.
-
-## Desktop app
-
-`install.sh` adds an **idea bank** entry to your application menu
-(`~/.local/share/applications/idea-bank.desktop`), so it's clickable like any
-other installed app rather than something you have to remember a URL for.
-Clicking it runs `desktop/launch.sh`, which starts the local server if it
-isn't already running, then opens the board in a chrome-less browser window
-(`brave`/`chromium`/`google-chrome` `--app=`, whichever is installed -- no
-address bar or tabs, so it reads as a real app window, not a browser tab).
-Falls back to `xdg-open` (a normal tab) if no Chromium-family browser is
-found. This is still the same Flask server and the same browser engine
-underneath -- no separate native-app runtime or extra dependency.
-
-## Privacy: encryption at rest
-
-Every piece of free-text content — idea text/notes/structured fields, goal
-text, and the raw lines `migrate.py` logs — is encrypted (via the
-`cryptography` package's Fernet, AES-128-CBC + HMAC) before it's ever written
-to `data/ideas.db`. Status, timestamps, and ids stay plaintext (they drive
-`WHERE`/`ORDER BY`/the status `CHECK` constraint, and aren't personal
-content), but the database file itself has no readable idea or goal text in
-it — opening it directly (`sqlite3 data/ideas.db`, a text editor, a backup
-tool) shows only ciphertext blobs prefixed `enc1:`.
-
-The encryption key lives outside the repository, at
-`~/.config/idea-bank/secret.key` (mode `0600`, generated automatically on
-first use) — never committed, never copied alongside the database. Losing
-that file means losing access to everything already encrypted with it, same
-as losing the key to any encrypted volume; there's no recovery path, by
-design (the whole point is that nothing but that key can decrypt the data).
-
-**Threat model**: this protects against someone reading `data/ideas.db` (or
-a copy of it, e.g. from a backup, a git accident, or a shared machine)
-without also having the key file. It does **not** protect against someone
-with full access to your running, unlocked machine — the key file is
-readable by your own user account, and the app itself decrypts everything
-it displays, same as any local disk encryption doesn't help once you're
-already logged in.
-
-A database created before this feature existed is migrated automatically
-and transparently: the first connection after upgrading re-writes every
-legacy plaintext row as ciphertext in place (`dbutil._ensure_encrypted_content`,
-idempotent — already-encrypted rows are skipped).
-
-## Migration
-
-`scripts/migrate.py` reads `~/ideas/inbox.md` **read-only** — it never writes
-to, moves, or deletes anything under `~/ideas/`. Each line
-(`YYYY-MM-DD HH:MM text`) becomes a `status='inbox'` row, with the original
-timestamp preserved as both `created_at` and `updated_at`.
-
-Two lines dated 2026-09-03 were known to contain captured shell output rather
-than real ideas. The script doesn't rely on knowing that in advance — it flags
-(instead of imports) any line whose text is blank, or that contains a
-shell-history/path marker (`zsh_history`, `bash_history`, `/home/`), into a
-`flagged_imports` table for manual review, along with any line that doesn't
-even match the `date time text` shape. Nothing flagged is silently dropped —
-you can inspect the full list at any time:
-
-```
-.venv/bin/python -c "
-import dbutil
-with dbutil.connection() as conn:
-    for row in conn.execute('SELECT * FROM flagged_imports'):
-        print(dict(row))
-"
-```
-
-**Re-running it is safe.** Every raw line — imported or flagged — is recorded
-by its exact text in an `import_log` table. Running `migrate.py` again only
-processes lines that are new since the last run (useful since the old system
-keeps capturing to `inbox.md` until you retire it):
-
-```
-.venv/bin/python scripts/migrate.py
-```
-
-Result of the run performed while building this: **7 imported**, **2 flagged**
-(the blank capture and the shell-output line), matching the known data issue
-exactly.
-
-## Confirmation: ~/ideas/ was left alone
-
-`expire.sh`, the `active/queued/archive/horizon` directories, and the old
-`idea-triage.timer` / `idea-horizon-review.timer` systemd units were never
-written to, moved, enabled, disabled, or deleted by anything in this project.
-`migrate.py` only ever opens `inbox.md` for reading.
-
-**One disclosed exception:** while testing the new `idea` CLI during
-development, two commands were run before a PATH/shell-function conflict (see
-below) was fixed, and — because the old `idea()` zsh function was still
-shadowing the new one at that moment — those two test commands appended two
-lines to `~/ideas/inbox.md` instead of hitting the new database as intended:
-
-```
-2026-09-03 09:32 test capture via new CLI
-2026-09-03 09:32 capture while server is stopped
-```
-
-Those lines are harmless (equivalent in spirit to the other test-artifact
-lines already in the file) and are still sitting in `inbox.md` — they were
-**not** removed, since editing that file, even to undo a mistake, is itself a
-write to `~/ideas/`, and this project treats that file as strictly read-only
-going forward. They were also not imported as real ideas into the new
-database (the two corresponding rows were deleted from `ideas` after the
-migration ran). Delete them from `inbox.md` yourself if you'd like, whenever
-you're ready to touch that file.
-
-## Assumptions made while building this
-
-- **`idea()` shell function vs. new `idea` CLI.** In zsh, a shell function
-  named `idea` shadows an executable named `idea` on `PATH`, so simply
-  symlinking the new CLI wasn't enough for `idea "text"` to reach the new
-  database. Per your choice, the old `idea() { ... }` function in `~/.zshrc`
-  was **commented out** (not deleted) with a note on how to restore it. This
-  is the one change outside `~/idea_bank/` and `~/ideas/` made by this
-  project. `~/ideas/inbox.md` and everything else about the old system is
-  unaffected — if you uncomment the function again, it will resume appending
-  to `inbox.md` exactly as before. The other old shell functions
-  (`idea-queue`, `horizon`) were left untouched since they don't collide with
-  anything new.
-- **A persistent server unit.** The brief asked for triage/horizon-review
-  timers that open the GUI, but not for a systemd unit that keeps the server
-  itself running. Since opening a browser tab to `localhost:8420` is only
-  useful if something is listening there, `install.sh` also installs and
-  enables `idea-bank-v2-server.service` (`Type=simple`, restarts on failure,
-  starts at login).
-- **Port 8420.** Chosen arbitrarily to avoid clashing with common local dev
-  ports (3000, 5000, 8000, 8080).
-- **Timestamp format.** Stored as `YYYY-MM-DD HH:MM:SS` (local time, ISO-ish,
-  sortable as text). Migrated rows get `:00` appended to the old system's
-  minute-precision timestamps.
-- **Flattened keyboard navigation.** `j`/`k`/arrows move through all cards in
-  column order (Inbox → Active → Queued → Horizon → Frontier → Archive), not
-  just within one column, since the brief didn't specify and this keeps a
-  single mental model for "next/previous idea."
-- **Goals are separate from ideas, not tags on them.** The first cut of this
-  feature tagged existing ideas as goals and derived completion from their
-  status. That didn't fit goals with no natural idea behind them (a step
-  count, say), so goals became their own record -- own text, an *optional*
-  idea link, self-reported completion (`goal done`/`goal undo`) instead of
-  anything derived from status. The live database had to be migrated off
-  the old `daily_goals` table (`dbutil._migrate_from_v1_daily_goals`) as
-  part of this change; it shipped empty in every real install, so the
-  migration drops it outright rather than trying to translate old rows into
-  the new shape.
-- **Streak math skips days with nothing due rather than penalizing them.**
-  `dbutil.compute_streak()` walks backward from today; a day before any goal
-  existed, after every goal covering it was stopped, or that just isn't one
-  of a recurring goal's chosen weekdays, neither extends nor breaks the
-  streak. Only a day where something was due and wasn't completed breaks it.
-- **Weekday convention: Python's `date.weekday()` (Monday=0..Sunday=6), not
-  JS's `Date.getDay()` (Sunday=0).** Chosen so the backend (`dbutil.py`) and
-  every stored `weekdays` value never need to convert; the GUI's weekday
-  pills carry Python-convention values directly in their markup, so no
-  conversion happens there either in practice.
-- **The goal-date smart-default cutoff is GUI-only, `localStorage` state,
-  same as the theme toggle.** There's nothing for it to default *for* on
-  the CLI, where a one-off goal's date is always given explicitly (or
-  defaults to plain today, with no notion of "it's evening, suggest
-  tomorrow").
-- **Corruption heuristics for migration** are pattern-based (blank text,
-  shell-history/path markers) rather than hardcoded to the two known bad
-  lines, so the script stays useful if `inbox.md` grows more such lines
-  before you retire the old system.
-- **Desktop app = a chrome-less browser window, not a separate native
-  runtime.** A dedicated GUI toolkit (e.g. pywebview) would need a system
-  package (webkit2gtk) beyond what's already installed; a `.desktop` entry
-  plus `--app=` on the browser you already have gives the same "click an
-  icon, get an app window" result with no new dependency.
-- **Dark/light/system stays a color-only toggle; the separate style toggle
-  is curated, not an arbitrary picker.** A freeform accent color picker was
-  considered and left out — the app has a specific, deliberate palette
-  (gold/teal/red status colors), and a color picker would mostly just
-  invite a mismatched combination without adding real usefulness. What *was*
-  added is a second, independent toggle for a handful of designed-together
-  identities (terminal/horizon/notebook -- typography plus a couple of
-  structural flourishes each, never colors), which composes with dark/light
-  rather than replacing it.
-- **The three GUI styles are system font stacks, not a webfont CDN.**
-  AGENTS.md declares "no external network calls" as an architecture
-  invariant; horizon and notebook's serif display faces (Georgia/Iowan Old
-  Style/Palatino, in different pairings) are chosen from what's already on
-  a typical desktop rather than pulling in Google Fonts or similar.
-- **"Completed" for a recurring goal means stopped, not "all its logged days
-  were done."** A daily habit with 40/60 days checked off is still *current*
-  until you `stop` it -- otherwise a goal-day you're behind on but haven't
-  given up on would flicker in and out of the "completed" archive depending
-  on today's check-in, which isn't what a progress archive is for. A one-off
-  goal has no such ambiguity: it completes exactly when its one target date
-  is marked done.
-- **Goal-idea linking is many-to-many, via a `goal_ideas` join table, not a
-  single `idea_id` column on `goals`.** The original single-link column
-  worked until a goal needed to represent progress toward more than one
-  idea at once (e.g. a shared milestone). Migrating meant `goal unlink`
-  could no longer mean "clear the link" -- it now takes a specific idea id,
-  since there can be more than one to choose from, mirroring `goal link`'s
-  own (goal, idea) argument shape exactly. Old single-idea_id data
-  migrates automatically (`dbutil._ensure_goal_ideas_join_table`), one row
-  per non-NULL `idea_id` becomes one `goal_ideas` row.
-- **Encryption covers free text, not status/dates/ids.** Those columns
-  drive SQL directly (`WHERE status = ...`, `ORDER BY updated_at`, the
-  status `CHECK` constraint) and aren't personal content on their own, so
-  encrypting them would cost real functionality (filtering, sorting, the
-  constraint itself) for no privacy benefit.
-
-## Project layout
-
-Lives at `~/idea_bank/` (the project's name -- "idea-bank-v2", as in the
-successor to the old `~/ideas/` system -- is separate from its directory
-name):
-
-```
-idea_bank/
-  server.py            Flask app: JSON API + serves static/
-  dbutil.py            shared SQLite schema/connection helper + encryption
-  static/
-    index.html          board GUI
-    idea.html           standalone pop-out idea editor
-    style.css
-    app.js               board GUI logic (+ theme toggle)
-    idea-window.js       pop-out editor logic
-  cli/idea              standalone capture script
-  desktop/
-    launch.sh            opens the board in a chrome-less browser window
-    idea-bank.desktop.template   app-menu entry (installed by install.sh)
-    icon.png              app-menu icon (regenerate with make_icon.py)
-    make_icon.py           (re)generates icon.png -- run by hand, not by install.sh
-  scripts/
-    expire.py            8-week queued -> archive sweep
-    migrate.py            one-time/re-runnable import from ~/ideas/inbox.md
-  systemd/
-    idea-bank-v2-server.service
-    idea-bank-v2-triage.service / .timer
-    idea-bank-v2-horizon-review.service / .timer
-  install.sh
-  requirements.txt
-  data/                 ideas.db, expire.log (created at runtime)
-
-~/.config/idea-bank/secret.key   encryption key (outside the repo, mode 0600)
-~/.local/share/applications/idea-bank.desktop   installed app-menu entry
-```
+MIT License. See [LICENSE](LICENSE) for details.

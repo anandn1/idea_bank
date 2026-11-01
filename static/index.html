@@ -18,9 +18,6 @@
   <button type="button" class="theme-toggle" id="theme-toggle" aria-label="cycle color theme" title="cycle theme (dark / light / system)">
     <span id="theme-toggle-label">theme: dark</span>
   </button>
-  <button type="button" class="style-toggle" id="style-toggle" aria-label="cycle visual style" title="cycle style (terminal / horizon / notebook)">
-    <span id="style-toggle-label">style: terminal</span>
-  </button>
   <div class="mode-indicator" id="mode-indicator" hidden></div>
   <div class="help">
     <span><b>g</b> goals</span>
@@ -37,12 +34,17 @@
 <main class="screens">
   <section class="screen goals-screen" id="goals-screen">
     <div class="goals-screen-inner">
-      <div class="goals-stats">
-        <span id="goal-streak">streak 0d</span>
-        <span id="goal-longest">best 0d</span>
-        <span id="goal-xp">0xp</span>
+      <div class="stats-block">
+        <div class="cmd-line"><span class="sym">$</span> idea goal streak</div>
+        <div class="goals-stats">
+          <span id="goal-streak">streak 0d</span>
+          <span id="goal-longest">best 0d</span>
+          <span id="goal-xp">0xp</span>
+        </div>
       </div>
 
+      <div class="add-block">
+      <div class="cmd-line"><span class="sym">$</span> idea goal add</div>
       <form class="goal-add-form" id="goal-add-form" autocomplete="off">
         <input type="text" id="goal-add-text" placeholder="new goal, e.g. walk 10000 steps">
         <div class="goal-add-weekdays" id="goal-add-weekdays" role="group" aria-label="recurs on">
@@ -63,15 +65,23 @@
           <button type="submit" class="goal-add-submit">add</button>
         </div>
       </form>
+      </div>
       <div class="goal-date-settings" id="goal-date-settings">
         <label><input type="checkbox" id="goal-date-smart-default" checked> smart default date</label>
         <label>suggest tomorrow after <input type="number" id="goal-date-cutoff-hour" min="0" max="23" value="18">:00</label>
       </div>
 
-      <div class="goal-list" id="goal-list"></div>
+      <div class="goal-section">
+        <button type="button" class="section-toggle" id="goal-list-toggle" aria-expanded="true" aria-controls="goal-list">
+          <span class="mark">[-]</span> current
+        </button>
+        <div class="goal-list" id="goal-list"></div>
+      </div>
 
-      <div class="goal-history" id="goal-history">
-        <div class="goal-history-label">completed</div>
+      <div class="goal-section" id="goal-history">
+        <button type="button" class="section-toggle" id="goal-history-toggle" aria-expanded="true" aria-controls="goal-history-list">
+          <span class="mark">[-]</span> completed
+        </button>
         <div class="goal-history-list" id="goal-history-list"></div>
       </div>
     </div>
