@@ -1,27 +1,29 @@
 # Idea Bank
 
-A local-first, keyboard-centric productivity system for tracking ideas and daily goals. Built with Python (Flask) + SQLite on the backend, paired with a vanilla HTML/CSS/JS frontend styled with a minimal terminal aesthetic.
+A local-first, keyboard-centric productivity system for tracking ideas and daily goals. Built with a Python (Flask) + SQLite backend and a clean, responsive single-page web interface styled with a focused terminal aesthetic.
 
-Runs completely on `localhost` with zero external network requests, no accounts, and client-side encrypted storage at rest.
+Runs entirely on `localhost` with zero external network requests, no user accounts or analytics, and client-side encryption for personal data at rest.
 
 ---
 
-## Highlights
+## Features
 
-- **Dual-surface operation**: A powerful CLI (`idea`) and an uncluttered single-page web GUI (`localhost:8420`) that share the exact same SQLite database.
-- **Goals & Streaks**: Track one-off and recurring daily/weekly goals with automatic streak calculations and completion archives.
-- **Idea Lifecycle Management**: Six distinct stages (`inbox` &rarr; `active` &rarr; `queued` &rarr; `horizon` &rarr; `frontier` &rarr; `archive`).
-- **Encrypted at Rest**: All idea text, field notes, and goal contents are encrypted using Fernet (AES-128-CBC + HMAC-SHA256) via Python's `cryptography` library. The secret key is stored locally outside the repository at `~/.config/idea-bank/secret.key`.
-- **Keyboard-first & Fast**: Full keyboard navigation (`j`/`k`, `/`, shortcut keys), instant client-side filtering, drag-and-drop board organization, and standalone pop-out windows.
-- **Scriptable & Agent-ready**: Every CLI command supports `--json` for automation and agent tooling.
+- **Dual Interfaces**: Work seamlessly from both a full-featured CLI (`idea`) and a web GUI (`localhost:8420`), both interacting with the same local SQLite database.
+- **Goals & Streak Tracking**: Track one-off milestones and recurring daily/weekly habits with streak statistics and completion archives.
+- **Structured Idea Lifecycle**: Organize thoughts into distinct stages:
+  `inbox` &rarr; `active` &rarr; `queued` &rarr; `horizon` &rarr; `frontier` &rarr; `archive`.
+- **Encrypted at Rest**: All idea text, field notes, and goal contents are encrypted using Fernet (AES-128-CBC + HMAC-SHA256). The encryption key is kept securely on your local system (`~/.config/idea-bank/secret.key`).
+- **Keyboard-Driven & Responsive**: Fast keyboard shortcuts (`j`/`k`, `/`, status toggles), interactive drag-and-drop organization, and detachable pop-out editor windows.
+- **Automation & Scripting Ready**: Subcommands support `--json` output and standardized exit codes for easy scripting and tooling integrations.
 
 ---
 
 ## Installation & Setup
 
 ### Prerequisites
-- Python 3.10+ (with SQLite support)
-- Linux desktop (optional, for systemd services and desktop application shortcut)
+
+- Python 3.10 or higher
+- Linux desktop (optional: enables background systemd services and desktop application shortcut)
 
 ### Quick Start
 
@@ -33,41 +35,38 @@ cd idea_bank
 ./install.sh
 ```
 
-`install.sh` performs the following automatically:
-1. Creates a Python virtual environment (`.venv/`) and installs dependencies.
-2. Symlinks `cli/idea` into `~/.local/bin/idea` (make sure `~/.local/bin` is in your `$PATH`).
-3. Installs and starts the systemd user service (`idea-bank-v2-server.service`).
-4. Installs the desktop application shortcut (`idea-bank.desktop`).
+The installer will:
+1. Create a local Python virtual environment (`.venv/`) and install dependencies.
+2. Symlink `cli/idea` into `~/.local/bin/idea` (ensure `~/.local/bin` is in your `$PATH`).
+3. Set up and start the background user service (`idea-bank-v2-server.service`).
+4. Add the desktop application launcher (`idea-bank.desktop`).
 
 Open **http://127.0.0.1:8420** in your browser, or launch **Idea Bank** from your application menu.
 
-### Manual Server Launch
+### Running Manually
 
-To run the Flask backend manually without systemd:
+If you prefer to start the server directly without systemd:
 
 ```bash
-# Set up venv and install dependencies
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-
-# Start the server on port 8420
 .venv/bin/python server.py
 ```
 
 ---
 
-## Command Line Interface (CLI)
+## Command Line Usage
 
-The CLI executable `cli/idea` operates directly on the SQLite database without requiring the web server to be running.
+The `idea` CLI tool interacts directly with the local SQLite database and works independently of whether the web server is running.
 
 ### Capturing Ideas
 
 ```bash
 idea "Refactor auth middleware"           # Capture to inbox (default)
-idea -q "Read paper on GRPO"              # Capture straight to queued
+idea -q "Read research paper"             # Capture straight to queued
 idea -a "Build prototype"                 # Capture to active
-idea -H "Start tech podcast"              # Capture to horizon (long-term)
-idea -f "Colonize Mars"                   # Capture to frontier (moonshots)
+idea -H "Start podcast"                   # Capture to horizon (long-term)
+idea -f "Moonshot project"                # Capture to frontier
 ```
 
 Batch capture from standard input:
@@ -78,69 +77,69 @@ printf "Task 1\nTask 2\nTask 3\n" | idea capture --stdin -q
 ### Managing Ideas
 
 ```bash
-idea list                                # List all ideas
+idea list                                # List all ideas (newest first)
 idea list -q                             # List only queued ideas
-idea list --json                         # Output ideas as JSON
+idea list --json                         # Format output as JSON
 
 idea show 42                             # Inspect idea #42
-idea edit 42 "Updated description"       # Edit text
-idea move 42 active                      # Move to active
-idea move 10 11 12 queued                # Batch move multiple ideas
-idea delete 42                           # Delete an idea
+idea edit 42 "Updated description"       # Update text
+idea move 42 active                      # Change status
+idea move 10 11 12 queued                # Batch move multiple items
+idea delete 42                           # Delete an item
 ```
 
-### Structured Fields & Notes
+### Custom Metadata & Notes
 
-Ideas support arbitrary `key=value` metadata fields:
+Attach custom `key=value` attributes and timestamped notes to any idea:
 ```bash
 idea 12 set priority=high due=2026-11-05 owner=alice
 idea 12 rm due
 idea 12 note "Follow up after morning standup"
 ```
 
-### Goals & Daily Tracking
+### Goals & Daily Habits
 
 ```bash
-idea goal list                           # List current active goals
-idea goal "Ship v2 release" --date 2026-11-02       # One-off goal
-idea goal "Morning run" --weekdays mon,wed,fri      # Recurring goal
-idea goal done 1                         # Mark goal #1 done for today
-idea goal undo 1                         # Unmark goal #1
+idea goal list                           # View current active goals
+idea goal "Complete documentation" --date 2026-11-02   # One-off goal
+idea goal "Morning run" --weekdays mon,wed,fri         # Recurring habit
+idea goal done 1                         # Mark goal #1 complete for today
+idea goal undo 1                         # Uncheck goal #1
 idea goal stop 2                         # Stop recurring goal #2
-idea goal history                        # View completed goal archive
+idea goal history                        # View past completed goals
 idea goal link 1 42                      # Link goal #1 to idea #42
-idea goal unlink 1 42                    # Unlink goal #1 from idea #42
+idea goal unlink 1 42                    # Remove link between goal #1 and idea #42
 ```
 
 ---
 
 ## Web Interface
 
-- **Goals Dashboard**: See today's streak, check off daily recurring and one-off targets, add new goals, and collapse active/completed sections.
-- **Kanban Board**: Drag-and-drop ideas across six status columns, batch move or delete cards, and filter cards instantly.
-- **Detail Modal & Pop-out**: Edit text, assign key-value fields, view linked goals, or click **pop out** to open the card in an isolated floating editor window (`static/idea.html`).
-- **Zero-Distraction Aesthetic**: High-contrast, monospace terminal styling utilizing self-hosted JetBrains Mono font weights with light/dark/system themes.
+- **Goals View**: Real-time habit streaks, daily checklists, goal creation, and collapsible history sections.
+- **Kanban Board**: Drag-and-drop cards across stages, instant search and status filtering, and multi-card actions.
+- **Card Details & Pop-out**: Edit metadata attributes, view linked goals, or pop out a card into an independent window (`static/idea.html`).
+- **Clean Aesthetic**: Distraction-free typography powered by self-hosted JetBrains Mono font weights, with Dark, Light, and System themes.
 
 ---
 
-## Development & Testing
+## Testing
 
-Run tests with `pytest`:
+Run the test suite with `pytest`:
 
 ```bash
 .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/pytest
 ```
 
-Tests run in complete isolation with mocked databases and throwaway encryption keys (see `tests/conftest.py`), ensuring your local `data/ideas.db` is never modified during test runs.
+Tests run in isolated environments using temporary databases and ephemeral encryption keys (see `tests/conftest.py`), ensuring your local database remains untouched.
 
 ---
 
 ## Architecture & Security
 
-- **Encryption at rest**: Content fields (`text`, `notes`, `fields`) are encrypted using Fernet before being written to SQLite. Status flags, IDs, and timestamps remain unencrypted to support fast index queries and constraints.
-- **No external network calls**: The web interface uses self-hosted assets under `static/fonts/` and zero CDNs or telemetry.
-- **CLI/GUI Parity**: Every action available in the GUI is fully supported in the CLI.
+- **Encrypted Content**: Idea text, notes, and goals are encrypted using Fernet prior to database storage. Identifiers, statuses, and timestamps remain unencrypted to support fast indexing, filtering, and foreign key constraints.
+- **Zero External Calls**: Fully self-contained. Static assets are bundled locally, ensuring no network traffic or analytics requests are ever made.
+- **Unified Logic**: Both the web GUI and the CLI operate through the same shared database layer (`dbutil.py`).
 
 ---
 
