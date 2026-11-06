@@ -41,7 +41,7 @@ frontend framework, no external network calls.
 
 1. **CLI/GUI equivalence, with one named exception.** Anything the GUI can
    do to an idea or goal — capture, move, edit, complete, delete, link/unlink
-   a goal to one or more ideas, browse completed-goal history — the CLI can
+   a goal to one or more ideas, browse completed-goal history, view goal stats — the CLI can
    do, and vice versa. Both ultimately call the same `dbutil.py` operations, and the
    JSON API mirrors the CLI's `--json` output shape. **Display-only GUI
    features have no CLI equivalent** (the theme toggle, the

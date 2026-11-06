@@ -14,6 +14,7 @@
       goals <span class="goals-badge" id="goals-badge">0/0</span>
     </button>
     <button type="button" class="screen-tab" id="tab-board" data-screen="board" role="tab" aria-selected="false">ideas</button>
+    <button type="button" class="screen-tab" id="tab-stats" data-screen="stats" role="tab" aria-selected="false">stats</button>
   </div>
   <button type="button" class="theme-toggle" id="theme-toggle" aria-label="cycle color theme" title="cycle theme (dark / light / system)">
     <span id="theme-toggle-label">theme: dark</span>
@@ -22,6 +23,7 @@
   <div class="help">
     <span><b>g</b> goals</span>
     <span><b>i</b> ideas</span>
+    <span><b>s</b> stats</span>
     <span><b>j/k</b> move</span>
     <span><b>a/q/h/f/x</b> move idea</span>
     <span><b>↵</b> open</span>
@@ -85,6 +87,42 @@
         <div class="goal-history-list" id="goal-history-list"></div>
       </div>
     </div>
+  </section>
+
+  <section class="screen stats-screen" id="stats-screen" hidden>
+    <div class="stats-screen-inner">
+      <div class="stats-block">
+        <div class="cmd-line"><span class="sym">$</span> idea goal stats</div>
+        <div class="stats-totals" id="stats-totals"></div>
+      </div>
+
+      <section class="stats-section" aria-labelledby="stats-heatmap-heading">
+        <h2 class="stats-heading" id="stats-heatmap-heading">last 365 days</h2>
+        <div class="heatmap-wrap" id="stats-heatmap"></div>
+      </section>
+
+      <div class="stats-columns">
+        <section class="stats-section" aria-labelledby="stats-rates-heading">
+          <h2 class="stats-heading" id="stats-rates-heading">completion</h2>
+          <div class="rate-rows" id="stats-rates"></div>
+        </section>
+        <section class="stats-section" aria-labelledby="stats-weekdays-heading">
+          <h2 class="stats-heading" id="stats-weekdays-heading">by weekday</h2>
+          <div class="rate-rows" id="stats-weekdays"></div>
+        </section>
+      </div>
+
+      <section class="stats-section" aria-labelledby="stats-recurring-heading">
+        <h2 class="stats-heading" id="stats-recurring-heading">recurring goals</h2>
+        <div class="stats-goal-list" id="stats-recurring"></div>
+      </section>
+
+      <section class="stats-section" aria-labelledby="stats-one-offs-heading">
+        <h2 class="stats-heading" id="stats-one-offs-heading">one-off goals</h2>
+        <div class="stats-one-offs" id="stats-one-offs"></div>
+      </section>
+    </div>
+    <div class="stats-tooltip" id="stats-tooltip" role="tooltip" hidden></div>
   </section>
 
   <section class="screen board-screen" id="board-screen" hidden>

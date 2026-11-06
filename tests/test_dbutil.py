@@ -746,3 +746,359 @@ def test_completed_goals_most_recently_completed_first(conn):
     completed = dbutil.completed_goals(conn)
 
     assert [g["id"] for g in completed] == [newer["id"], older["id"]]
+
+
+# ---- goal_stats ----
+#
+# Fixed "today" throughout: 2026-09-10, a Thursday. A daily goal created
+# 2026-09-01 is due on 10 days (09-01..09-10), today being the last.
+
+STATS_TODAY = "2026-09-10"
+
+
+def _mark_done(conn, goal_id, dates):
+    for date in dates:
+        dbutil.set_goal_done(conn, goal_id, date, True)
+
+
+def _stopped_on(conn, goal_id, date):
+    conn.execute(
+        "UPDATE goals SET archived_at = ? WHERE id = ?", (f"{date} 09:00:00", goal_id)
+    )
+    conn.commit()
+
+
+def _rate_for(stats, window):
+    return next(r for r in stats["rates"] if r["window"] == window)
+
+
+def test_goal_stats_with_no_goals_is_all_empty(conn):
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    assert stats["today"] == STATS_TODAY
+    assert stats["totals"] == {"checkoffs": 0, "tracked_days": 0, "perfect_days": 0}
+    assert stats["heatmap"] == []
+    assert stats["recurring"] == []
+    assert stats["one_offs"] == {"done": 0, "missed": 0, "pending": 0}
+    assert [r["window"] for r in stats["rates"]] == ["7d", "30d", "90d", "all"]
+    assert all((r["done"], r["due"], r["rate"]) == (0, 0, None) for r in stats["rates"])
+    assert [w["weekday"] for w in stats["weekdays"]] == list(range(7))
+    assert all(w["rate"] is None for w in stats["weekdays"])
+
+
+def test_goal_stats_unfinished_today_is_left_out_of_rates(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    _mark_done(conn, goal_id, ["2026-09-01", "2026-09-02"])
+
+    all_time = _rate_for(dbutil.goal_stats(conn, today=STATS_TODAY), "all")
+
+    # 09-01..09-09 are settled (9 due days); today is still open
+    assert all_time == {"window": "all", "done": 2, "due": 9, "rate": 0.2222}
+
+
+def test_goal_stats_done_today_counts_toward_rates(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    _mark_done(conn, goal_id, [STATS_TODAY])
+
+    all_time = _rate_for(dbutil.goal_stats(conn, today=STATS_TODAY), "all")
+
+    assert (all_time["done"], all_time["due"]) == (1, 10)
+
+
+def test_goal_stats_rolling_window_includes_exactly_its_last_n_days(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    # 09-04 is the oldest day inside the 7-day window ending 09-10;
+    # 09-03 is the newest day outside it
+    _mark_done(conn, goal_id, ["2026-09-03", "2026-09-04"])
+
+    week = _rate_for(dbutil.goal_stats(conn, today=STATS_TODAY), "7d")
+
+    # due 09-04..09-09 (today undone, so not counted): 6 days, 1 done
+    assert (week["done"], week["due"]) == (1, 6)
+
+
+def test_goal_stats_weekday_goal_only_due_on_its_weekdays(conn):
+    # Mon/Wed only: 09-02 (Wed), 09-07 (Mon), 09-09 (Wed) before today
+    goal_id = _insert_recurring_goal(conn, "gym", "2026-09-01", weekdays="0,2")
+    _mark_done(conn, goal_id, ["2026-09-07"])
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    goal = stats["recurring"][0]
+    assert (goal["done"], goal["due"]) == (1, 3)
+    by_weekday = {w["weekday"]: (w["done"], w["due"]) for w in stats["weekdays"]}
+    assert by_weekday[0] == (1, 1)
+    assert by_weekday[2] == (0, 2)
+    assert by_weekday[3] == (0, 0)
+
+
+def test_goal_stats_stopped_goal_not_due_from_its_stop_day_and_sorted_last(conn):
+    stopped_id = _insert_recurring_goal(conn, "stopped habit", "2026-09-01")
+    _stopped_on(conn, stopped_id, "2026-09-04")
+    active_id = _insert_recurring_goal(conn, "active habit", "2026-09-08")
+
+    recurring = dbutil.goal_stats(conn, today=STATS_TODAY)["recurring"]
+
+    assert [g["id"] for g in recurring] == [active_id, stopped_id]
+    stopped = recurring[1]
+    assert stopped["due"] == 3  # 09-01..09-03; the stop day itself isn't due
+    assert stopped["archived_at"] == "2026-09-04 09:00:00"
+
+
+def test_goal_stats_per_goal_streak_and_best(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    # run of 3, miss 09-04, run of 2 ending yesterday; today undone
+    _mark_done(
+        conn,
+        goal_id,
+        ["2026-09-01", "2026-09-02", "2026-09-03", "2026-09-08", "2026-09-09"],
+    )
+
+    goal = dbutil.goal_stats(conn, today=STATS_TODAY)["recurring"][0]
+
+    assert goal["streak"] == 2
+    assert goal["best_streak"] == 3
+    assert goal["last_done"] == "2026-09-09"
+
+
+def test_goal_stats_per_goal_streak_resets_after_missing_yesterday(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    _mark_done(conn, goal_id, ["2026-09-07", "2026-09-08"])
+
+    goal = dbutil.goal_stats(conn, today=STATS_TODAY)["recurring"][0]
+
+    assert goal["streak"] == 0
+    assert goal["best_streak"] == 2
+
+
+def test_goal_stats_goal_never_done(conn):
+    _insert_recurring_goal(conn, "walk", "2026-09-01")
+
+    goal = dbutil.goal_stats(conn, today=STATS_TODAY)["recurring"][0]
+
+    assert goal["text"] == "walk"
+    assert (goal["streak"], goal["best_streak"], goal["last_done"]) == (0, 0, None)
+    assert goal["rate"] == 0.0
+
+
+def test_goal_stats_one_offs_split_done_missed_pending(conn):
+    done = dbutil.create_goal(conn, "done one", target_date="2026-09-05")
+    dbutil.set_goal_done(conn, done["id"], "2026-09-05", True)
+    dbutil.create_goal(conn, "missed one", target_date="2026-09-09")
+    dbutil.create_goal(conn, "due today", target_date=STATS_TODAY)
+    dbutil.create_goal(conn, "future one", target_date="2026-09-20")
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    assert stats["one_offs"] == {"done": 1, "missed": 1, "pending": 2}
+    assert stats["recurring"] == []
+
+
+def test_goal_stats_heatmap_runs_from_first_due_day_to_today(conn):
+    goal_id = _insert_recurring_goal(conn, "gym", "2026-09-01", weekdays="0,2")
+    _mark_done(conn, goal_id, ["2026-09-07"])
+
+    heatmap = dbutil.goal_stats(conn, today=STATS_TODAY)["heatmap"]
+
+    # first due day is Wed 09-02, not the 09-01 creation date
+    assert heatmap[0] == {"date": "2026-09-02", "done": 0, "due": 1}
+    assert heatmap[-1]["date"] == STATS_TODAY
+    assert len(heatmap) == 9
+    by_date = {d["date"]: (d["done"], d["due"]) for d in heatmap}
+    assert by_date["2026-09-03"] == (0, 0)  # nothing due still gets an entry
+    assert by_date["2026-09-07"] == (1, 1)
+
+
+def test_goal_stats_heatmap_sums_goals_due_the_same_day(conn):
+    walk = _insert_recurring_goal(conn, "walk", "2026-09-09")
+    _insert_recurring_goal(conn, "read", "2026-09-09")  # due, left undone
+    one_off = dbutil.create_goal(conn, "call", target_date="2026-09-09")
+    _mark_done(conn, walk, ["2026-09-09"])
+    dbutil.set_goal_done(conn, one_off["id"], "2026-09-09", True)
+
+    heatmap = dbutil.goal_stats(conn, today=STATS_TODAY)["heatmap"]
+
+    assert heatmap[0] == {"date": "2026-09-09", "done": 2, "due": 3}
+
+
+def test_goal_stats_heatmap_capped_to_last_365_days(conn):
+    _insert_recurring_goal(conn, "walk", "2024-01-01")
+
+    heatmap = dbutil.goal_stats(conn, today=STATS_TODAY)["heatmap"]
+
+    assert len(heatmap) == dbutil.STATS_HEATMAP_DAYS
+    assert heatmap[0]["date"] == "2025-09-11"
+    assert heatmap[-1]["date"] == STATS_TODAY
+
+
+def test_goal_stats_totals_perfect_and_tracked_days(conn):
+    walk = _insert_recurring_goal(conn, "walk", "2026-09-08")
+    read = _insert_recurring_goal(conn, "read", "2026-09-08")
+    _mark_done(conn, walk, ["2026-09-08", "2026-09-09", STATS_TODAY])
+    _mark_done(conn, read, ["2026-09-08"])
+
+    totals = dbutil.goal_stats(conn, today=STATS_TODAY)["totals"]
+
+    # 09-08 perfect, 09-09 half done, today half done so not yet tracked
+    assert totals == {"checkoffs": 4, "tracked_days": 2, "perfect_days": 1}
+
+
+def test_goal_stats_today_counts_as_tracked_once_fully_done(conn):
+    walk = _insert_recurring_goal(conn, "walk", STATS_TODAY)
+    _mark_done(conn, walk, [STATS_TODAY])
+
+    totals = dbutil.goal_stats(conn, today=STATS_TODAY)["totals"]
+
+    assert totals == {"checkoffs": 1, "tracked_days": 1, "perfect_days": 1}
+
+
+def test_goal_stats_per_goal_rate_excludes_undone_today(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-08")
+    _mark_done(conn, goal_id, ["2026-09-08", "2026-09-09"])
+
+    goal = dbutil.goal_stats(conn, today=STATS_TODAY)["recurring"][0]
+
+    assert (goal["done"], goal["due"], goal["rate"]) == (2, 2, 1.0)
+
+
+def test_goal_stats_weekday_rates_exclude_undone_today(conn):
+    _insert_recurring_goal(conn, "walk", "2026-09-01")
+
+    weekdays = dbutil.goal_stats(conn, today=STATS_TODAY)["weekdays"]
+
+    thursday = weekdays[3]
+    assert thursday["due"] == 1  # 09-03 only; today (Thu 09-10) is still open
+
+
+def test_goal_stats_one_off_done_today_counts_in_totals_and_heatmap(conn):
+    goal = dbutil.create_goal(conn, "call", target_date=STATS_TODAY)
+    dbutil.set_goal_done(conn, goal["id"], STATS_TODAY, True)
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    assert stats["totals"]["checkoffs"] == 1
+    assert stats["heatmap"] == [{"date": STATS_TODAY, "done": 1, "due": 1}]
+    assert stats["one_offs"] == {"done": 1, "missed": 0, "pending": 0}
+
+
+def test_goal_stats_30d_and_90d_windows(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-05-01")
+    # 30d window starts 08-12, 90d window starts 06-13
+    _mark_done(conn, goal_id, ["2026-06-12", "2026-06-13", "2026-08-11", "2026-08-12"])
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    month, quarter = _rate_for(stats, "30d"), _rate_for(stats, "90d")
+    assert (month["done"], month["due"]) == (1, 29)
+    assert (quarter["done"], quarter["due"]) == (3, 89)
+
+
+def test_goal_stats_goal_created_after_today_has_nothing_due(conn):
+    _insert_recurring_goal(conn, "later", "2026-09-20")
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    assert stats["heatmap"] == []
+    assert (stats["recurring"][0]["due"], stats["recurring"][0]["rate"]) == (0, None)
+
+
+def test_goal_stats_stopped_goal_has_no_current_streak_but_keeps_best(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    _mark_done(conn, goal_id, ["2026-09-01", "2026-09-02", "2026-09-03"])
+    _stopped_on(conn, goal_id, "2026-09-04")
+
+    goal = dbutil.goal_stats(conn, today=STATS_TODAY)["recurring"][0]
+
+    assert (goal["streak"], goal["best_streak"]) == (0, 3)
+
+
+def test_goal_stats_ignores_log_rows_without_completed_at(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-09")
+    conn.execute(
+        "INSERT INTO goal_log (goal_id, date, completed_at) VALUES (?, ?, NULL)",
+        (goal_id, "2026-09-09"),
+    )
+    conn.commit()
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    assert stats["totals"]["checkoffs"] == 0
+    assert stats["recurring"][0]["done"] == 0
+
+
+def test_goal_stats_skips_one_off_without_target_date(conn):
+    conn.execute(
+        "INSERT INTO goals (text, weekdays, target_date, created_at) "
+        "VALUES (?, NULL, NULL, '2026-09-01 08:00:00')",
+        (dbutil.encrypt_str("legacy"),),
+    )
+    conn.commit()
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    assert stats["one_offs"] == {"done": 0, "missed": 0, "pending": 0}
+    assert stats["heatmap"] == []
+
+
+def test_goal_stats_heatmap_agrees_with_goals_due_on(conn):
+    daily = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    gym = _insert_recurring_goal(conn, "gym", "2026-09-02", weekdays="0,2,4")
+    stopped = _insert_recurring_goal(conn, "old", "2026-09-01")
+    _stopped_on(conn, stopped, "2026-09-05")
+    one_off = dbutil.create_goal(conn, "call", target_date="2026-09-06")
+    _mark_done(conn, daily, ["2026-09-01", "2026-09-04", "2026-09-09"])
+    _mark_done(conn, gym, ["2026-09-04", "2026-09-07"])
+    _mark_done(conn, stopped, ["2026-09-02"])
+    dbutil.set_goal_done(conn, one_off["id"], "2026-09-06", True)
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    for day in stats["heatmap"]:
+        due = dbutil.goals_due_on(conn, day["date"])
+        expected = (sum(1 for g in due if g["completed_at"]), len(due))
+        assert (day["done"], day["due"]) == expected, day["date"]
+
+
+def test_goal_stats_check_off_on_stop_day_still_counts(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-08")
+    _mark_done(conn, goal_id, [STATS_TODAY])
+    _stopped_on(conn, goal_id, STATS_TODAY)
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    goal = stats["recurring"][0]
+    assert stats["totals"]["checkoffs"] == 1
+    assert goal["last_done"] == STATS_TODAY
+    assert (goal["done"], goal["due"]) == (1, 3)  # 09-08, 09-09 missed; today done
+
+
+def test_goal_stats_future_check_offs_wait_until_their_day(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2026-09-09")
+    _mark_done(conn, goal_id, ["2026-09-15"])
+    one_off = dbutil.create_goal(conn, "call", target_date="2026-09-20")
+    dbutil.set_goal_done(conn, one_off["id"], "2026-09-20", True)
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    assert stats["totals"]["checkoffs"] == 0
+    assert stats["heatmap"][-1] == {"date": STATS_TODAY, "done": 0, "due": 1}
+    assert stats["one_offs"] == {"done": 1, "missed": 0, "pending": 0}
+
+
+def test_goal_stats_all_time_window_is_not_capped(conn):
+    goal_id = _insert_recurring_goal(conn, "walk", "2024-01-01")
+    _mark_done(conn, goal_id, ["2024-01-01"])
+
+    stats = dbutil.goal_stats(conn, today=STATS_TODAY)
+
+    assert _rate_for(stats, "all")["done"] == 1
+    assert _rate_for(stats, "90d")["done"] == 0
+
+
+def test_goal_stats_decrypts_goal_text(conn):
+    goal = dbutil.create_goal(conn, "secret habit", weekdays=[0, 1, 2, 3, 4, 5, 6])
+
+    stats = dbutil.goal_stats(conn)
+
+    assert stats["recurring"][0]["id"] == goal["id"]
+    assert stats["recurring"][0]["text"] == "secret habit"

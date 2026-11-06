@@ -742,3 +742,54 @@ def test_help_exits_zero(run_cli):
 def test_subcommand_help_exits_zero(run_cli):
     result = run_cli("move", "--help")
     assert result.returncode == 0
+
+
+# ---- goal stats ----
+
+
+def test_goal_stats_json_shape(run_cli):
+    result = run_cli("goal", "stats", "--json")
+
+    assert result.returncode == 0
+    assert set(parse(result)) == {
+        "today",
+        "totals",
+        "rates",
+        "weekdays",
+        "heatmap",
+        "recurring",
+        "one_offs",
+    }
+
+
+def test_goal_stats_reflects_a_completed_recurring_goal(run_cli):
+    goal = parse(run_cli("goal", "add", "walk", "--weekdays", "daily", "--json"))
+    run_cli("goal", "done", str(goal["id"]), "--json")
+
+    stats = parse(run_cli("goal", "stats", "--json"))
+
+    assert stats["totals"]["checkoffs"] == 1
+    assert stats["recurring"][0]["text"] == "walk"
+    assert stats["recurring"][0]["streak"] == 1
+    assert stats["heatmap"][-1] == {"date": stats["today"], "done": 1, "due": 1}
+
+
+def test_goal_stats_human_output_on_empty_db(run_cli):
+    result = run_cli("goal", "stats")
+
+    assert result.returncode == 0
+    assert "check-offs 0" in result.stdout
+    assert "recurring goals\n  none yet" in result.stdout
+    assert "last 12 weeks" not in result.stdout
+
+
+def test_goal_stats_human_output_lists_goal_and_heatmap(run_cli):
+    goal = parse(run_cli("goal", "add", "walk", "--weekdays", "daily", "--json"))
+    run_cli("goal", "done", str(goal["id"]), "--json")
+
+    result = run_cli("goal", "stats")
+
+    assert result.returncode == 0
+    assert f"#{goal['id']} (daily) walk" in result.stdout
+    assert "streak 1, best 1" in result.stdout
+    assert "last 12 weeks" in result.stdout

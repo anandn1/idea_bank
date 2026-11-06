@@ -107,6 +107,7 @@ idea goal done 1                         # Mark goal #1 complete for today
 idea goal undo 1                         # Uncheck goal #1
 idea goal stop 2                         # Stop recurring goal #2
 idea goal history                        # View past completed goals
+idea goal stats                          # Completion rates, per-goal streaks, heatmap
 idea goal link 1 42                      # Link goal #1 to idea #42
 idea goal unlink 1 42                    # Remove link between goal #1 and idea #42
 ```
@@ -116,6 +117,7 @@ idea goal unlink 1 42                    # Remove link between goal #1 and idea 
 ## Web Interface
 
 - **Goals View**: Real-time habit streaks, daily checklists, goal creation, and collapsible history sections.
+- **Stats View**: A year-long completion heatmap, 7/30/90-day and all-time completion rates, a by-weekday breakdown, each recurring goal's rate and streaks, and one-off goals done/missed/pending.
 - **Kanban Board**: Drag-and-drop cards across stages, instant search and status filtering, and multi-card actions.
 - **Card Details & Pop-out**: Edit metadata attributes, view linked goals, or pop out a card into an independent window (`static/idea.html`).
 - **Clean Aesthetic**: Distraction-free typography powered by self-hosted JetBrains Mono font weights, with Dark, Light, and System themes.

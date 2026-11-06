@@ -14,6 +14,7 @@ Run `idea --help` to see all subcommands.
 """
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -251,6 +252,7 @@ def build_epilog() -> str:
         "  idea goal unlink 5                               remove goal #5's idea link\n"
         "  idea goal streak                                 current streak and lifetime xp\n"
         "  idea goal history                                completed goals: the progress archive\n"
+        "  idea goal stats                                  completion rates, per-goal streaks, heatmap\n"
         "  idea show 12                                     an idea's detail, including its linked goals\n"
         "  Completion is always self-reported -- a goal never derives 'done' from\n"
         "  an idea's status, since most goals (like the steps example) have no idea.\n"
@@ -473,6 +475,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     add_json_flag(goal_history)
+
+    goal_stats = goal_sub.add_parser(
+        "stats", help="show goal stats: completion rates, per-goal streaks, heatmap",
+        description=(
+            "Everything the GUI's stats tab shows: lifetime check-offs and "
+            "perfect days, completion rates over the last 7/30/90 days and "
+            "all time, completion by weekday, each recurring goal's rate and "
+            "streaks, one-off goals done/missed/pending, and a heatmap of "
+            "recent days. Today only counts once its goals are done, so an "
+            "unfinished today never lowers a rate. --json also includes the "
+            "full per-day heatmap (up to the last 365 days)."
+        ),
+    )
+    add_json_flag(goal_stats)
 
     return parser
 
@@ -847,6 +863,113 @@ def cmd_goal_history(args) -> int:
     return 0
 
 
+CLI_HEATMAP_WEEKS = 12
+HEATMAP_SHADES = "░▒▓█"
+NOTHING_DUE_MARK = "·"
+NONE_DONE_MARK = "-"
+RATE_BAR_WIDTH = 20
+
+
+def format_rate(rate: dict) -> str:
+    if rate["rate"] is None:
+        return "  --  (nothing due)"
+    return f"{rate['rate']:>4.0%}  ({rate['done']}/{rate['due']})"
+
+
+def rate_bar(rate: dict) -> str:
+    filled = round((rate["rate"] or 0) * RATE_BAR_WIDTH)
+    return "█" * filled + "·" * (RATE_BAR_WIDTH - filled)
+
+
+def heatmap_cell(day: dict) -> str:
+    if day["due"] == 0:
+        return NOTHING_DUE_MARK
+    if day["done"] == 0:
+        return NONE_DONE_MARK
+    if day["done"] >= day["due"]:
+        return HEATMAP_SHADES[-1]
+    partial_shades = len(HEATMAP_SHADES) - 1
+    return HEATMAP_SHADES[math.ceil(day["done"] / day["due"] * partial_shades) - 1]
+
+
+def heatmap_lines(heatmap: list[dict]) -> list[str]:
+    """Rows Mon..Sun, one column per week (at most CLI_HEATMAP_WEEKS,
+    Monday-aligned), newest week on the right."""
+    if not heatmap:
+        return []
+    last_day = dbutil.date_cls.fromisoformat(heatmap[-1]["date"])
+    first_monday = last_day - dbutil.timedelta(
+        days=last_day.weekday() + 7 * (CLI_HEATMAP_WEEKS - 1)
+    )
+    recent = [d for d in heatmap if d["date"] >= first_monday.isoformat()]
+    first_weekday = dbutil.date_cls.fromisoformat(recent[0]["date"]).weekday()
+    cells = [None] * first_weekday + recent
+    weeks = [cells[i:i + 7] for i in range(0, len(cells), 7)]
+    return [
+        f"  {WEEKDAY_DISPLAY[weekday]}  "
+        + " ".join(
+            heatmap_cell(week[weekday]) if weekday < len(week) and week[weekday] else " "
+            for week in weeks
+        )
+        for weekday in range(7)
+    ]
+
+
+def print_goal_stats(stats: dict) -> None:
+    totals = stats["totals"]
+    print(f"goal stats through {stats['today']}")
+    print(
+        f"  check-offs {totals['checkoffs']}   "
+        f"perfect days {totals['perfect_days']}/{totals['tracked_days']}"
+    )
+
+    print("\ncompletion")
+    for rate in stats["rates"]:
+        label = "all time" if rate["window"] == "all" else f"last {rate['window']}"
+        print(f"  {label:<9} {format_rate(rate)}")
+
+    print("\nby weekday")
+    for rate in stats["weekdays"]:
+        print(f"  {WEEKDAY_DISPLAY[rate['weekday']]}  {rate_bar(rate)}  {format_rate(rate)}")
+
+    print("\nrecurring goals")
+    if not stats["recurring"]:
+        print("  none yet")
+    for g in stats["recurring"]:
+        stopped = f" [stopped {g['archived_at'][:10]}]" if g["archived_at"] else ""
+        print(
+            f"  #{g['id']} ({format_weekdays(g['weekdays'])}) {g['text']}{stopped}\n"
+            f"      {format_rate(g).strip()}, streak {g['streak']}, "
+            f"best {g['best_streak']}, last done {g['last_done'] or 'never'}"
+        )
+
+    one_offs = stats["one_offs"]
+    print(
+        f"\none-off goals\n  {one_offs['done']} done, {one_offs['missed']} missed, "
+        f"{one_offs['pending']} pending"
+    )
+
+    lines = heatmap_lines(stats["heatmap"])
+    if lines:
+        print(
+            f"\nlast {CLI_HEATMAP_WEEKS} weeks  "
+            f"({NOTHING_DUE_MARK} nothing due, {NONE_DONE_MARK} none done, "
+            f"{HEATMAP_SHADES} more done)"
+        )
+        print("\n".join(lines))
+
+
+def cmd_goal_stats(args) -> int:
+    with dbutil.connection() as conn:
+        stats = dbutil.goal_stats(conn)
+
+    if args.json:
+        print(json.dumps(stats))
+    else:
+        print_goal_stats(stats)
+    return 0
+
+
 GOAL_COMMANDS = {
     "add": cmd_goal_add,
     "done": cmd_goal_done,
@@ -858,6 +981,7 @@ GOAL_COMMANDS = {
     "list": cmd_goal_list,
     "streak": cmd_goal_streak,
     "history": cmd_goal_history,
+    "stats": cmd_goal_stats,
 }
 
 
@@ -865,7 +989,7 @@ def cmd_goal(args) -> int:
     if args.goal_command is None:
         return fail(
             args,
-            "missing goal subcommand: add/done/undo/stop/remove/link/unlink/list/streak/history "
+            "missing goal subcommand: add/done/undo/stop/remove/link/unlink/list/streak/history/stats "
             "(see `idea goal --help`)",
         )
     return GOAL_COMMANDS[args.goal_command](args)

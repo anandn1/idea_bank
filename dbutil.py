@@ -13,7 +13,9 @@ import json
 import os
 import sqlite3
 import sys
+from collections import defaultdict
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import date as date_cls
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -777,3 +779,223 @@ def completed_goals(conn: sqlite3.Connection) -> list[dict]:
         key=lambda g: g["last_completed"] or g["archived_at"] or "", reverse=True
     )
     return result
+
+
+# ---- goal stats: the stats screen and `idea goal stats` ----
+#
+# Derived on every call from goals + goal_log -- no stored aggregates that
+# could drift. A "goal-day" is one goal being due on one day. Today's
+# goal-days only count once they're done, so an unfinished today never drags
+# a rate or a streak down (the same rule compute_streak follows).
+
+STATS_RATE_WINDOWS_DAYS = (7, 30, 90)
+STATS_HEATMAP_DAYS = 365
+
+
+@dataclass(frozen=True)
+class GoalDay:
+    goal_id: int
+    day: date_cls
+    done: bool
+
+
+def _days_between(start: date_cls, end: date_cls) -> list[date_cls]:
+    """Every day from start to end inclusive; empty if end is before start."""
+    return [start + timedelta(days=n) for n in range((end - start).days + 1)]
+
+
+def _due_dates_through(goal: dict, today: date_cls) -> list[date_cls]:
+    """Every day up to and including `today` that `goal` was due -- the same
+    rules goals_due_on applies one day at a time."""
+    if goal["weekdays"] is None:
+        if goal["target_date"] is None:
+            return []
+        target = date_cls.fromisoformat(goal["target_date"])
+        return [target] if target <= today else []
+    start = date_cls.fromisoformat(goal["created_at"][:10])
+    end = today
+    if goal["archived_at"]:
+        stopped_on = date_cls.fromisoformat(goal["archived_at"][:10])
+        end = min(end, stopped_on - timedelta(days=1))
+    weekdays = set(goal["weekdays"])
+    return [d for d in _days_between(start, end) if d.weekday() in weekdays]
+
+
+def _tracked_dates(
+    goal: dict, completed: set[tuple[int, str]], today: date_cls
+) -> list[date_cls]:
+    """A goal's due days through today, plus any day through today it was
+    checked off -- so a check-off made on the day a goal is stopped (which
+    makes that day no longer due) still counts. Check-offs dated after
+    today don't count yet."""
+    last_day = today.isoformat()
+    checked_off = {
+        date_cls.fromisoformat(day)
+        for goal_id, day in completed
+        if goal_id == goal["id"] and day <= last_day
+    }
+    return sorted(set(_due_dates_through(goal, today)) | checked_off)
+
+
+def _completed_keys(conn: sqlite3.Connection) -> set[tuple[int, str]]:
+    rows = conn.execute(
+        "SELECT goal_id, date FROM goal_log WHERE completed_at IS NOT NULL"
+    ).fetchall()
+    return {(r["goal_id"], r["date"]) for r in rows}
+
+
+def _settled(goal_days: list[GoalDay], today: date_cls) -> list[GoalDay]:
+    return [gd for gd in goal_days if gd.done or gd.day < today]
+
+
+def _rate(goal_days: list[GoalDay]) -> dict:
+    done = sum(1 for gd in goal_days if gd.done)
+    due = len(goal_days)
+    return {"done": done, "due": due, "rate": round(done / due, 4) if due else None}
+
+
+def _rolling_rates(settled: list[GoalDay], today: date_cls) -> list[dict]:
+    rates = []
+    for days in STATS_RATE_WINDOWS_DAYS:
+        window_start = today - timedelta(days=days - 1)
+        in_window = [gd for gd in settled if gd.day >= window_start]
+        rates.append({"window": f"{days}d", **_rate(in_window)})
+    rates.append({"window": "all", **_rate(settled)})
+    return rates
+
+
+def _weekday_rates(settled: list[GoalDay]) -> list[dict]:
+    return [
+        {"weekday": weekday, **_rate([gd for gd in settled if gd.day.weekday() == weekday])}
+        for weekday in range(7)
+    ]
+
+
+def _group_by_day(goal_days: list[GoalDay]) -> dict[date_cls, list[GoalDay]]:
+    by_day = defaultdict(list)
+    for gd in goal_days:
+        by_day[gd.day].append(gd)
+    return by_day
+
+
+def _heatmap(goal_days: list[GoalDay], today: date_cls) -> list[dict]:
+    """One entry per day from the first due day (capped to the last
+    STATS_HEATMAP_DAYS) through today, including days with nothing due."""
+    if not goal_days:
+        return []
+    earliest_shown = today - timedelta(days=STATS_HEATMAP_DAYS - 1)
+    start = max(min(gd.day for gd in goal_days), earliest_shown)
+    by_day = _group_by_day(goal_days)
+    return [
+        {
+            "date": day.isoformat(),
+            "done": sum(1 for gd in by_day[day] if gd.done),
+            "due": len(by_day[day]),
+        }
+        for day in _days_between(start, today)
+    ]
+
+
+def _day_totals(goal_days: list[GoalDay], today: date_cls) -> dict:
+    """A day is tracked once it's settled (past, or today fully done) and
+    perfect when every goal due on it was done."""
+    tracked = perfect = 0
+    for day, due in _group_by_day(goal_days).items():
+        all_done = all(gd.done for gd in due)
+        if day < today or all_done:
+            tracked += 1
+            perfect += all_done
+    return {
+        "checkoffs": sum(1 for gd in goal_days if gd.done),
+        "tracked_days": tracked,
+        "perfect_days": perfect,
+    }
+
+
+def _current_and_best_run(settled: list[GoalDay]) -> tuple[int, int]:
+    """Consecutive done goal-days ending at the latest settled one, and the
+    longest such run ever. `settled` must be one goal's days, oldest first."""
+    best = run = 0
+    for gd in settled:
+        run = run + 1 if gd.done else 0
+        best = max(best, run)
+    return run, best
+
+
+def _recurring_goal_stats(goal: dict, own_days: list[GoalDay], today: date_cls) -> dict:
+    """A stopped goal has no current streak -- only its best one."""
+    settled = _settled(own_days, today)
+    streak, best_streak = _current_and_best_run(settled)
+    if goal["archived_at"]:
+        streak = 0
+    done_days = [gd.day for gd in own_days if gd.done]
+    return {
+        "id": goal["id"],
+        "text": goal["text"],
+        "weekdays": goal["weekdays"],
+        "created_at": goal["created_at"],
+        "archived_at": goal["archived_at"],
+        **_rate(settled),
+        "streak": streak,
+        "best_streak": best_streak,
+        "last_done": max(done_days).isoformat() if done_days else None,
+    }
+
+
+def _one_off_summary(
+    one_offs: list[dict], completed: set[tuple[int, str]], today: date_cls
+) -> dict:
+    """Pending covers today and later -- a one-off due today isn't missed
+    until the day is over. A goal with no target date is never due (see
+    goals_due_on), so it's left out."""
+    summary = {"done": 0, "missed": 0, "pending": 0}
+    for goal in one_offs:
+        if goal["target_date"] is None:
+            continue
+        if (goal["id"], goal["target_date"]) in completed:
+            summary["done"] += 1
+        elif date_cls.fromisoformat(goal["target_date"]) < today:
+            summary["missed"] += 1
+        else:
+            summary["pending"] += 1
+    return summary
+
+
+def goal_stats(conn: sqlite3.Connection, today: str | None = None) -> dict:
+    """Everything the stats screen shows: lifetime totals, rolling and
+    per-weekday completion rates, a per-day heatmap, a per-goal breakdown of
+    recurring goals (active first, then stopped), and one-off counts. All of
+    it runs through `today` -- except one_offs, which also counts goals
+    targeting later days (done early or still pending)."""
+    today_d = date_cls.fromisoformat(today) if today else date_cls.today()
+    rows = conn.execute(f"SELECT {GOAL_COLUMNS} FROM goals ORDER BY created_at").fetchall()
+    goals = [row_to_goal(conn, row) for row in rows]
+    completed = _completed_keys(conn)
+
+    days_by_goal = {
+        goal["id"]: [
+            GoalDay(goal["id"], day, (goal["id"], day.isoformat()) in completed)
+            for day in _tracked_dates(goal, completed, today_d)
+        ]
+        for goal in goals
+    }
+    goal_days = [gd for own_days in days_by_goal.values() for gd in own_days]
+    settled = _settled(goal_days, today_d)
+    recurring = sorted(
+        (g for g in goals if g["weekdays"] is not None),
+        key=lambda g: g["archived_at"] is not None,
+    )
+
+    return {
+        "today": today_d.isoformat(),
+        "totals": _day_totals(goal_days, today_d),
+        "rates": _rolling_rates(settled, today_d),
+        "weekdays": _weekday_rates(settled),
+        "heatmap": _heatmap(goal_days, today_d),
+        "recurring": [
+            _recurring_goal_stats(g, days_by_goal[g["id"]], today_d) for g in recurring
+        ],
+        "one_offs": _one_off_summary(
+            [g for g in goals if g["weekdays"] is None], completed, today_d
+        ),
+    }
