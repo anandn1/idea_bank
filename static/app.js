@@ -395,6 +395,7 @@ async function fetchGoalsData() {
   completedGoals = await completedRes.json();
   renderGoalsBadge();
   if (currentScreen === "goals") renderGoalsPanel();
+  if (currentScreen === "stats") renderStats();
 }
 
 // ---- smart-default date: after a configurable cutoff hour (default 6pm),
@@ -732,6 +733,275 @@ goalAddForm.addEventListener("submit", async (e) => {
   goalAddText.focus();
 });
 
+// ---- stats screen: read-only dashboard over /api/goals/stats (the same
+// data as `idea goal stats --json`). Fetched when the tab opens and on the
+// auto-refresh tick while it's visible. ----
+
+const HEATMAP_LEVELS = 4;
+const HEATMAP_FULL_YEAR_DAYS = 365;
+const HEATMAP_CELL_GAP_PX = 3;
+const HEATMAP_CELL_MIN_PX = 11;
+const HEATMAP_CELL_MAX_PX = 20;
+const HEATMAP_DAY_LABEL_PX = 38;
+const MONTH_DISPLAY = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const RATE_WINDOW_LABELS = { "7d": "last 7 days", "30d": "last 30 days", "90d": "last 90 days", all: "all time" };
+
+const statsTooltipEl = document.getElementById("stats-tooltip");
+let goalStats = null;
+
+async function fetchStats() {
+  const res = await fetch("/api/goals/stats");
+  goalStats = await res.json();
+  if (currentScreen === "stats") renderStats();
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function parseLocalDate(isoDate) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+// Monday=0..Sunday=6, matching the backend's weekday numbering.
+function mondayFirstWeekday(date) {
+  return (date.getDay() + 6) % 7;
+}
+
+function formatPercent(rate) {
+  return rate.rate === null ? "--" : `${Math.round(rate.rate * 100)}%`;
+}
+
+function renderStats() {
+  if (!goalStats) return;
+  renderStatsTotals();
+  renderHeatmap(goalStats.heatmap, goalStats.today);
+  renderRateRows(
+    document.getElementById("stats-rates"),
+    goalStats.rates.map((rate) => [RATE_WINDOW_LABELS[rate.window], rate])
+  );
+  renderRateRows(
+    document.getElementById("stats-weekdays"),
+    goalStats.weekdays.map((rate) => [WEEKDAY_DISPLAY[rate.weekday], rate])
+  );
+  renderStatsRecurring();
+  renderStatsOneOffs();
+}
+
+function buildTotalTile(value, label, accent) {
+  const tile = el("div", "stats-total" + (accent ? " accent" : ""));
+  tile.appendChild(el("div", "stats-total-value", value));
+  tile.appendChild(el("div", "stats-total-label", label));
+  return tile;
+}
+
+function renderStatsTotals() {
+  const { totals } = goalStats;
+  const container = document.getElementById("stats-totals");
+  container.innerHTML = "";
+  container.appendChild(buildTotalTile(String(totals.checkoffs), "check-offs"));
+  container.appendChild(
+    buildTotalTile(`${totals.perfect_days}/${totals.tracked_days}`, "perfect days")
+  );
+  container.appendChild(buildTotalTile(`${streakInfo.streak}d`, "streak", streakInfo.streak > 0));
+  container.appendChild(buildTotalTile(`${streakInfo.longest}d`, "best streak"));
+}
+
+function heatmapLevel(day) {
+  if (day.due === 0) return "none";
+  if (day.done === 0) return "missed";
+  // only a fully done day gets the darkest step; partial days share the rest
+  if (day.done >= day.due) return String(HEATMAP_LEVELS);
+  return String(Math.ceil((day.done / day.due) * (HEATMAP_LEVELS - 1)));
+}
+
+function heatmapTip(day) {
+  const date = parseLocalDate(day.date);
+  const label = `${WEEKDAY_DISPLAY[mondayFirstWeekday(date)]} ${day.date}`;
+  if (day.due === 0) return `${label} · nothing due`;
+  return `${label} · ${day.done}/${day.due} done`;
+}
+
+function buildHeatmapCell(day, today) {
+  const cell = el("div", "heatmap-cell");
+  cell.dataset.level = heatmapLevel(day);
+  cell.dataset.tip = heatmapTip(day);
+  if (day.date === today && day.done < day.due) cell.classList.add("today");
+  return cell;
+}
+
+function buildHeatmapLegend() {
+  const legend = el("div", "heatmap-legend");
+  const swatch = (level) => {
+    const cell = el("span", "heatmap-cell");
+    cell.dataset.level = level;
+    return cell;
+  };
+  legend.append(swatch("none"), el("span", null, "nothing due"));
+  legend.append(swatch("missed"), el("span", null, "missed"));
+  legend.append(el("span", null, "less"));
+  for (let level = 1; level <= HEATMAP_LEVELS; level++) legend.append(swatch(String(level)));
+  legend.append(el("span", null, "more"));
+  return legend;
+}
+
+// Grow cells to fill the width when there's under a year of history, so a
+// few weeks of data isn't a postage stamp; past the minimum it scrolls.
+function heatmapCellSize(availableWidth, weekCount) {
+  const fitted = Math.floor((availableWidth - HEATMAP_DAY_LABEL_PX) / weekCount) - HEATMAP_CELL_GAP_PX;
+  return Math.min(HEATMAP_CELL_MAX_PX, Math.max(HEATMAP_CELL_MIN_PX, fitted));
+}
+
+// Columns are weeks (Mon..Sun top to bottom), oldest on the left, so the
+// first column is padded with blanks back to its Monday.
+function renderHeatmap(heatmap, today) {
+  const wrap = document.getElementById("stats-heatmap");
+  const heading = document.getElementById("stats-heatmap-heading");
+  wrap.innerHTML = "";
+  if (heatmap.length === 0) {
+    heading.textContent = "history";
+    wrap.appendChild(el("div", "goals-empty-hint", "no goals yet -- add one on the goals tab and check it off"));
+    return;
+  }
+  heading.textContent =
+    heatmap.length >= HEATMAP_FULL_YEAR_DAYS ? "last 365 days" : `since ${heatmap[0].date}`;
+
+  const padding = mondayFirstWeekday(parseLocalDate(heatmap[0].date));
+  const weekCount = Math.ceil((padding + heatmap.length) / 7);
+  wrap.style.setProperty("--cell", `${heatmapCellSize(wrap.clientWidth, weekCount)}px`);
+
+  const months = el("div", "heatmap-months");
+  const grid = el("div", "heatmap-grid");
+  grid.setAttribute("role", "img");
+  grid.setAttribute(
+    "aria-label",
+    `${goalStats.totals.perfect_days} perfect days out of ${goalStats.totals.tracked_days} tracked`
+  );
+  months.style.gridTemplateColumns = `repeat(${weekCount}, var(--cell))`;
+  grid.style.gridTemplateColumns = `repeat(${weekCount}, var(--cell))`;
+
+  for (let i = 0; i < padding; i++) grid.appendChild(el("div", "heatmap-cell blank"));
+  let lastMonth = null;
+  heatmap.forEach((day, index) => {
+    grid.appendChild(buildHeatmapCell(day, today));
+    const date = parseLocalDate(day.date);
+    const isWeekStart = mondayFirstWeekday(date) === 0 || index === 0;
+    if (isWeekStart && date.getMonth() !== lastMonth) {
+      const label = el("span", "heatmap-month", MONTH_DISPLAY[date.getMonth()]);
+      label.style.gridColumnStart = String(Math.floor((padding + index) / 7) + 1);
+      months.appendChild(label);
+      lastMonth = date.getMonth();
+    }
+  });
+
+  const dayLabels = el("div", "heatmap-days");
+  WEEKDAY_DISPLAY.forEach((name, weekday) => {
+    dayLabels.appendChild(el("span", null, weekday % 2 === 0 ? name : ""));
+  });
+
+  const scroller = el("div", "heatmap-scroll");
+  const body = el("div", "heatmap-body");
+  body.append(months, grid);
+  scroller.append(dayLabels, body);
+  wrap.append(scroller, buildHeatmapLegend());
+  scroller.scrollLeft = scroller.scrollWidth;
+}
+
+function buildRateBar(rate) {
+  const track = el("div", "rate-bar");
+  const fill = el("div", "rate-bar-fill");
+  fill.style.width = `${(rate.rate || 0) * 100}%`;
+  track.appendChild(fill);
+  return track;
+}
+
+function renderRateRows(container, labelledRates) {
+  container.innerHTML = "";
+  for (const [label, rate] of labelledRates) {
+    const row = el("div", "rate-row" + (rate.rate === null ? " empty" : ""));
+    row.appendChild(el("span", "rate-label", label));
+    row.appendChild(buildRateBar(rate));
+    row.appendChild(el("span", "rate-value", formatPercent(rate)));
+    row.appendChild(el("span", "rate-count", `${rate.done}/${rate.due}`));
+    container.appendChild(row);
+  }
+}
+
+function buildStatsGoalRow(goal) {
+  const row = el("div", "stats-goal-row" + (goal.archived_at ? " stopped" : ""));
+
+  const head = el("div", "stats-goal-head");
+  head.appendChild(el("span", "stats-goal-text", goal.text));
+  head.appendChild(el("span", "goal-tag", formatWeekdays(goal.weekdays)));
+  if (goal.archived_at) {
+    head.appendChild(el("span", "goal-tag", `stopped ${goal.archived_at.slice(0, 10)}`));
+  }
+  row.appendChild(head);
+
+  const rateLine = el("div", "rate-row");
+  rateLine.appendChild(buildRateBar(goal));
+  rateLine.appendChild(el("span", "rate-value", formatPercent(goal)));
+  rateLine.appendChild(el("span", "rate-count", `${goal.done}/${goal.due}`));
+  row.appendChild(rateLine);
+
+  const meta = el("div", "stats-goal-meta");
+  const streak = el("span", goal.streak > 0 ? "accent" : null, `streak ${goal.streak}`);
+  meta.append(
+    streak,
+    el("span", null, `best ${goal.best_streak}`),
+    el("span", null, `last done ${goal.last_done || "never"}`)
+  );
+  row.appendChild(meta);
+  return row;
+}
+
+function renderStatsRecurring() {
+  const container = document.getElementById("stats-recurring");
+  container.innerHTML = "";
+  if (goalStats.recurring.length === 0) {
+    container.appendChild(el("div", "goals-empty-hint", "no recurring goals yet -- pick weekdays when adding a goal"));
+    return;
+  }
+  for (const goal of goalStats.recurring) container.appendChild(buildStatsGoalRow(goal));
+}
+
+function renderStatsOneOffs() {
+  const { done, missed, pending } = goalStats.one_offs;
+  const container = document.getElementById("stats-one-offs");
+  container.innerHTML = "";
+  container.append(
+    buildTotalTile(String(done), "done", false),
+    buildTotalTile(String(missed), "missed", false),
+    buildTotalTile(String(pending), "pending", false)
+  );
+}
+
+function showStatsTooltip(cell) {
+  statsTooltipEl.textContent = cell.dataset.tip;
+  statsTooltipEl.hidden = false;
+  const rect = cell.getBoundingClientRect();
+  const tipWidth = statsTooltipEl.offsetWidth;
+  const left = Math.min(
+    Math.max(8, rect.left + rect.width / 2 - tipWidth / 2),
+    window.innerWidth - tipWidth - 8
+  );
+  statsTooltipEl.style.left = `${left}px`;
+  statsTooltipEl.style.top = `${rect.top - statsTooltipEl.offsetHeight - 8}px`;
+}
+
+document.getElementById("stats-heatmap").addEventListener("mouseover", (e) => {
+  const cell = e.target.closest(".heatmap-grid .heatmap-cell[data-tip]");
+  if (cell) showStatsTooltip(cell);
+  else statsTooltipEl.hidden = true;
+});
+document.getElementById("stats-heatmap").addEventListener("mouseleave", () => {
+  statsTooltipEl.hidden = true;
+});
+
 // ---- screens: goals and board are full-screen sibling sections, switched
 // by the top-bar tabs (or g/i) -- goals is the default on load. Both stay
 // fetched regardless of which is visible, so switching is instant. ----
@@ -739,12 +1009,14 @@ goalAddForm.addEventListener("submit", async (e) => {
 const screenTabs = document.querySelectorAll(".screen-tab");
 const goalsScreenEl = document.getElementById("goals-screen");
 const boardScreenEl = document.getElementById("board-screen");
+const statsScreenEl = document.getElementById("stats-screen");
 let currentScreen = "goals";
 
 function showScreen(name) {
   currentScreen = name;
   goalsScreenEl.hidden = name !== "goals";
   boardScreenEl.hidden = name !== "board";
+  statsScreenEl.hidden = name !== "stats";
   screenTabs.forEach((tab) => {
     const active = tab.dataset.screen === name;
     tab.classList.toggle("selected", active);
@@ -754,6 +1026,10 @@ function showScreen(name) {
     renderGoalAddIdeaChips();
     renderGoalsPanel();
     updateGoalAddDateVisibility();
+  }
+  if (name === "stats") {
+    renderStats();
+    fetchStats();
   }
 }
 
@@ -1262,6 +1538,9 @@ document.addEventListener("keydown", (e) => {
     case "i":
       showScreen("board");
       break;
+    case "s":
+      showScreen("stats");
+      break;
     case "v":
       toggleVisualMode();
       break;
@@ -1291,6 +1570,7 @@ window.addEventListener("load", () => {
     const col = document.querySelector('.column[data-status="horizon"]');
     if (col) col.scrollIntoView({ inline: "start" });
   }
+  if (window.location.hash === "#stats") showScreen("stats");
 });
 
 // keep relative timestamps fresh without a full re-render
@@ -1314,6 +1594,7 @@ const AUTO_REFRESH_INTERVAL_MS = 90000;
 setInterval(() => {
   if (editingId === null) fetchIdeas();
   fetchGoalsData();
+  if (currentScreen === "stats") fetchStats();
 }, AUTO_REFRESH_INTERVAL_MS);
 
 showScreen("goals");

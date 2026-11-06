@@ -219,6 +219,12 @@ def completed_goals_route():
         return jsonify(dbutil.completed_goals(conn))
 
 
+@app.get("/api/goals/stats")
+def goal_stats_route():
+    with dbutil.connection() as conn:
+        return jsonify(dbutil.goal_stats(conn))
+
+
 @app.get("/api/ideas/<int:idea_id>/goals")
 def idea_goals_route(idea_id):
     with dbutil.connection() as conn:
