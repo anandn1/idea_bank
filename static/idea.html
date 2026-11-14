@@ -6,40 +6,80 @@
 <title>idea</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body class="standalone-idea">
+<body class="idea-view-page">
 
-<div class="modal" role="dialog" aria-label="idea detail">
-  <div class="modal-header">
-    <div class="modal-status-pills" id="modal-status-pills"></div>
-    <button type="button" class="modal-close" id="modal-close" title="close window" aria-label="close">×</button>
+<header class="topbar">
+  <a class="brand view-back" href="/" title="back to the board"><span class="prompt">$</span> idea</a>
+  <div class="view-cmd" id="view-cmd">idea show --full</div>
+  <div class="view-save-state" id="view-save-state" role="status" aria-live="polite"></div>
+</header>
+
+<main class="idea-view" id="idea-view" hidden>
+  <section class="view-hero" aria-labelledby="view-title">
+    <div class="view-hero-top">
+      <div class="view-eyebrow" id="view-eyebrow"></div>
+      <div class="view-status-pills" id="view-status-pills" role="group" aria-label="status"></div>
+    </div>
+    <textarea class="view-title" id="view-title" rows="1" aria-label="idea text" spellcheck="true"></textarea>
+    <div class="view-meta" id="view-meta"></div>
+    <div class="xp" id="view-xp">
+      <div class="xp-bar" id="view-xp-bar" role="img"></div>
+      <div class="xp-label" id="view-xp-label"></div>
+    </div>
+    <div class="view-tiles" id="view-tiles"></div>
+  </section>
+
+  <div class="view-grid">
+    <aside class="view-side">
+      <section class="panel" id="panel-chapters" aria-labelledby="chapters-title">
+        <h2 class="panel-title" id="chapters-title">chapters</h2>
+        <ol class="chapter-list" id="chapter-list"></ol>
+      </section>
+
+      <section class="panel" aria-labelledby="fields-title">
+        <h2 class="panel-title" id="fields-title">fields</h2>
+        <div class="panel-body">
+          <div class="sheet" id="field-sheet"></div>
+          <button type="button" class="panel-action" id="field-add">+ add field</button>
+        </div>
+      </section>
+
+      <section class="panel" aria-labelledby="timeline-title">
+        <h2 class="panel-title" id="timeline-title">timeline</h2>
+        <ol class="timeline" id="timeline"></ol>
+      </section>
+    </aside>
+
+    <div class="view-main">
+      <section class="panel" aria-labelledby="objectives-title">
+        <h2 class="panel-title" id="objectives-title">objectives <span class="panel-count" id="objectives-count"></span></h2>
+        <div class="objectives" id="objectives"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="notes-title">
+        <h2 class="panel-title" id="notes-title">
+          notes
+          <button type="button" class="notes-toggle" id="notes-toggle" aria-pressed="false">edit</button>
+        </h2>
+        <div class="panel-body">
+          <div class="notes-view" id="notes-view" title="double-click to edit"></div>
+          <textarea class="modal-notes" id="notes-editor" rows="4" aria-label="notes" placeholder="notes -- markdown works: # heading, ## chapter, - list, - [ ] task, **bold**, `code`, [link](https://...)" hidden></textarea>
+        </div>
+      </section>
+    </div>
   </div>
 
-  <textarea class="modal-text" id="modal-text" rows="4"></textarea>
-
-  <div class="modal-section">
-    <div class="modal-section-label">fields</div>
-    <div class="modal-fields" id="modal-fields"></div>
-    <button type="button" class="modal-add-field" id="modal-add-field">+ add field</button>
+  <div class="view-danger">
+    <button type="button" class="modal-delete" id="view-delete">delete idea</button>
   </div>
+</main>
 
-  <div class="modal-section">
-    <div class="modal-section-label">goals</div>
-    <div class="modal-goals" id="modal-goals"></div>
-  </div>
+<div class="view-notice" id="view-notice" hidden></div>
 
-  <div class="modal-section">
-    <div class="modal-section-label">notes</div>
-    <textarea class="modal-notes" id="modal-notes" rows="4" placeholder="freeform notes..."></textarea>
-  </div>
-
-  <div class="modal-meta" id="modal-meta"></div>
-
-  <div class="modal-footer">
-    <button type="button" class="modal-delete" id="modal-delete">delete</button>
-    <button type="button" class="modal-done" id="modal-done">done</button>
-  </div>
-</div>
-
-<script src="idea-window.js"></script>
+<script src="vendor/marked.umd.js"></script>
+<script src="vendor/purify.min.js"></script>
+<script src="markdown.js"></script>
+<script src="ui-common.js"></script>
+<script src="idea-view.js"></script>
 </body>
 </html>

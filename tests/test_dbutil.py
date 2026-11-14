@@ -1,9 +1,11 @@
 import json
 import sqlite3
+from datetime import date, datetime
 
 import pytest
 
 import dbutil
+from conftest import FIXED_TODAY
 
 
 def test_get_conn_creates_schema(db_path):
@@ -753,7 +755,7 @@ def test_completed_goals_most_recently_completed_first(conn):
 # Fixed "today" throughout: 2026-09-10, a Thursday. A daily goal created
 # 2026-09-01 is due on 10 days (09-01..09-10), today being the last.
 
-STATS_TODAY = "2026-09-10"
+STATS_TODAY = FIXED_TODAY
 
 
 def _mark_done(conn, goal_id, dates):
@@ -1102,3 +1104,422 @@ def test_goal_stats_decrypts_goal_text(conn):
 
     assert stats["recurring"][0]["id"] == goal["id"]
     assert stats["recurring"][0]["text"] == "secret habit"
+
+
+# ---- idea status history (idea_events) ----
+
+
+def _status_history(conn, idea_id):
+    rows = conn.execute(
+        "SELECT from_status, to_status, changed_at FROM idea_events WHERE idea_id = ? ORDER BY id",
+        (idea_id,),
+    ).fetchall()
+    return [tuple(r) for r in rows]
+
+
+def test_update_idea_records_each_status_change(conn):
+    idea_id = dbutil.add_idea("x")
+    dbutil.update_idea(conn, idea_id, {"status": "active"})
+    dbutil.update_idea(conn, idea_id, {"status": "archive"})
+
+    history = _status_history(conn, idea_id)
+
+    assert [(old, new) for old, new, _ in history] == [("inbox", "active"), ("active", "archive")]
+    assert history[-1][2] == dbutil.get_idea(conn, idea_id)["updated_at"]
+
+
+def test_update_idea_to_the_same_status_records_nothing(conn):
+    idea_id = dbutil.add_idea("x", status="active")
+    dbutil.update_idea(conn, idea_id, {"status": "active"})
+
+    assert _status_history(conn, idea_id) == []
+
+
+def test_update_idea_without_status_records_nothing(conn):
+    idea_id = dbutil.add_idea("x")
+    dbutil.update_idea(conn, idea_id, {"text": "y", "notes": "n", "fields": {"a": "1"}})
+
+    assert _status_history(conn, idea_id) == []
+
+
+def test_update_missing_idea_records_nothing(conn):
+    assert dbutil.update_idea(conn, 999, {"status": "active"}) is None
+    assert conn.execute("SELECT COUNT(*) FROM idea_events").fetchone()[0] == 0
+
+
+def test_delete_idea_removes_idea_history_and_links_but_keeps_goals(conn):
+    idea_id = dbutil.add_idea("x")
+    other_id = dbutil.add_idea("other")
+    dbutil.update_idea(conn, idea_id, {"status": "active"})
+    dbutil.update_idea(conn, other_id, {"status": "active"})
+    goal = dbutil.create_goal(conn, "walk", idea_ids=[idea_id, other_id])
+
+    dbutil.delete_idea(conn, idea_id)
+
+    assert dbutil.get_idea(conn, idea_id) is None
+    assert _status_history(conn, idea_id) == []
+    assert len(_status_history(conn, other_id)) == 1
+    assert dbutil.get_goal(conn, goal["id"])["idea_ids"] == [other_id]
+
+
+# ---- idea_overview ----
+#
+# Same fixed "today" as the goal_stats tests: Thursday 2026-09-10.
+
+
+def _link(conn, goal_id, idea_id):
+    dbutil.link_goal(conn, goal_id, idea_id)
+
+
+def test_idea_overview_missing_idea_is_none(conn):
+    assert dbutil.idea_overview(conn, 999, today=STATS_TODAY) is None
+
+
+def test_idea_overview_without_goals(conn):
+    idea_id = dbutil.add_idea("lonely", fields={"a": "1"})
+
+    overview = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)
+
+    assert overview["today"] == STATS_TODAY
+    assert overview["idea"] == dbutil.get_idea(conn, idea_id)
+    assert overview["goals"] == []
+    assert overview["progress"] == {"done": 0, "due": 0, "rate": None, "checkoffs": 0}
+    assert [e["kind"] for e in overview["timeline"]] == ["created"]
+
+
+def test_idea_overview_goal_progress_and_today_flags(conn):
+    idea_id = dbutil.add_idea("quest")
+    walk = _insert_recurring_goal(conn, "walk", "2026-09-07")  # due 09-07..09-10
+    _link(conn, walk, idea_id)
+    _mark_done(conn, walk, ["2026-09-07", "2026-09-08", STATS_TODAY])
+
+    goal = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["goals"][0]
+
+    assert (goal["done"], goal["due"], goal["rate"]) == (3, 4, 0.75)
+    assert (goal["streak"], goal["best_streak"]) == (1, 2)
+    assert goal["last_done"] == STATS_TODAY
+    assert (goal["due_today"], goal["done_today"]) == (True, True)
+    assert goal["text"] == "walk"
+
+
+def test_idea_overview_goal_not_due_today(conn):
+    idea_id = dbutil.add_idea("quest")
+    gym = _insert_recurring_goal(conn, "gym", "2026-09-01", weekdays="0,2")  # Mon/Wed
+    _link(conn, gym, idea_id)
+
+    goal = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["goals"][0]
+
+    assert (goal["due_today"], goal["done_today"]) == (False, False)
+
+
+def test_idea_overview_recent_covers_last_84_days_through_today(conn):
+    idea_id = dbutil.add_idea("quest")
+    gym = _insert_recurring_goal(conn, "gym", "2026-09-01", weekdays="0,2")
+    _link(conn, gym, idea_id)
+    _mark_done(conn, gym, ["2026-09-07"])
+
+    recent = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["goals"][0]["recent"]
+
+    assert len(recent) == dbutil.OVERVIEW_RECENT_DAYS
+    assert recent[0]["date"] == "2026-06-19"
+    assert recent[-1] == {"date": STATS_TODAY, "due": 0, "done": 0}
+    by_date = {d["date"]: (d["due"], d["done"]) for d in recent}
+    assert by_date["2026-09-07"] == (1, 1)  # Mon, done
+    assert by_date["2026-09-09"] == (1, 0)  # Wed, missed
+    assert by_date["2026-09-08"] == (0, 0)  # Tue, not scheduled
+    assert by_date["2026-08-31"] == (0, 0)  # before the goal existed
+
+
+def test_idea_overview_progress_spans_all_linked_goals_only(conn):
+    idea_id = dbutil.add_idea("quest")
+    walk = _insert_recurring_goal(conn, "walk", "2026-09-08")
+    read = _insert_recurring_goal(conn, "read", "2026-09-08")
+    unlinked = _insert_recurring_goal(conn, "unlinked", "2026-09-08")
+    _link(conn, walk, idea_id)
+    _link(conn, read, idea_id)
+    _mark_done(conn, walk, ["2026-09-08", "2026-09-09", STATS_TODAY])
+    _mark_done(conn, unlinked, ["2026-09-08", "2026-09-09"])
+
+    progress = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["progress"]
+
+    # walk 3/3 (today done), read 0/2 (today still open)
+    assert progress == {"done": 3, "due": 5, "rate": 0.6, "checkoffs": 3}
+
+
+def test_idea_overview_goals_include_completion_info(conn):
+    idea_id = dbutil.add_idea("quest")
+    one_off = dbutil.create_goal(conn, "call", idea_ids=[idea_id], target_date="2026-09-05")
+    dbutil.set_goal_done(conn, one_off["id"], "2026-09-05", True)
+
+    goal = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["goals"][0]
+
+    assert goal["completed"] is True
+    assert goal["last_completed"] == "2026-09-05"
+    assert goal["ideas"] == [{"id": idea_id, "text": "quest"}]
+
+
+def test_idea_overview_timeline_kinds_newest_first(conn):
+    idea_id = dbutil.add_idea("quest", created_at="2026-09-01 08:00:00")
+    conn.execute(
+        "INSERT INTO idea_events (idea_id, from_status, to_status, changed_at) "
+        "VALUES (?, 'inbox', 'active', '2026-09-02 09:00:00')",
+        (idea_id,),
+    )
+    walk = _insert_recurring_goal(conn, "walk", "2026-09-03")
+    _link(conn, walk, idea_id)
+    _stopped_on(conn, walk, "2026-09-06")
+    one_off = dbutil.create_goal(conn, "call", idea_ids=[idea_id], target_date="2026-09-05")
+    conn.execute("UPDATE goals SET created_at = '2026-09-04 10:00:00' WHERE id = ?", (one_off["id"],))
+    conn.execute(
+        "INSERT INTO goal_log (goal_id, date, completed_at) VALUES (?, '2026-09-05', '2026-09-05 18:00:00')",
+        (one_off["id"],),
+    )
+    conn.commit()
+
+    timeline = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["timeline"]
+
+    assert [(e["at"], e["kind"]) for e in timeline] == [
+        ("2026-09-06 09:00:00", "goal_stopped"),
+        ("2026-09-05 18:00:00", "goal_done"),
+        ("2026-09-04 10:00:00", "goal_created"),
+        ("2026-09-03 08:00:00", "goal_created"),
+        ("2026-09-02 09:00:00", "status"),
+        ("2026-09-01 08:00:00", "created"),
+    ]
+    assert timeline[4]["from"] == "inbox" and timeline[4]["to"] == "active"
+    assert timeline[0]["goal_id"] == walk and timeline[0]["goal_text"] == "walk"
+
+
+def test_idea_overview_timeline_same_second_events_read_newest_first(conn):
+    idea_id = dbutil.add_idea("quest", created_at="2026-09-01 08:00:00")
+    conn.execute(
+        "INSERT INTO idea_events (idea_id, from_status, to_status, changed_at) "
+        "VALUES (?, 'inbox', 'active', '2026-09-01 08:00:00')",
+        (idea_id,),
+    )
+    conn.commit()
+
+    kinds = [e["kind"] for e in dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["timeline"]]
+
+    assert kinds == ["status", "created"]
+
+
+def test_idea_overview_unfinished_one_off_has_no_done_event(conn):
+    idea_id = dbutil.add_idea("quest")
+    dbutil.create_goal(conn, "call", idea_ids=[idea_id], target_date="2026-09-20")
+
+    kinds = [e["kind"] for e in dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["timeline"]]
+
+    assert "goal_done" not in kinds
+    assert "goal_stopped" not in kinds
+
+
+def test_idea_overview_timeline_same_second_orders_by_kind(conn):
+    idea_id = dbutil.add_idea("quest", created_at="2026-09-01 08:00:00")
+    walk = _insert_recurring_goal(conn, "walk", "2026-09-01")  # created 08:00:00 too
+    _link(conn, walk, idea_id)
+    _stopped_on(conn, walk, "2026-09-05")
+    conn.execute("UPDATE goals SET archived_at = '2026-09-01 08:00:00' WHERE id = ?", (walk,))
+    conn.execute(
+        "INSERT INTO idea_events (idea_id, from_status, to_status, changed_at) "
+        "VALUES (?, 'inbox', 'active', '2026-09-01 08:00:00')",
+        (idea_id,),
+    )
+    conn.commit()
+
+    kinds = [e["kind"] for e in dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["timeline"]]
+
+    assert kinds == ["goal_stopped", "goal_created", "status", "created"]
+
+
+def test_idea_overview_stopped_goal_keeps_best_streak_only(conn):
+    idea_id = dbutil.add_idea("quest")
+    walk = _insert_recurring_goal(conn, "walk", "2026-09-01")
+    _link(conn, walk, idea_id)
+    _mark_done(conn, walk, ["2026-09-01", "2026-09-02", "2026-09-03"])
+    _stopped_on(conn, walk, "2026-09-04")
+
+    goal = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["goals"][0]
+
+    assert (goal["streak"], goal["best_streak"], goal["due_today"]) == (0, 3, False)
+
+
+def test_idea_overview_one_off_without_target_date(conn):
+    idea_id = dbutil.add_idea("quest", created_at="2026-08-01 08:00:00")
+    conn.execute(
+        "INSERT INTO goals (text, weekdays, target_date, created_at) "
+        "VALUES (?, NULL, NULL, '2026-09-01 08:00:00')",
+        (dbutil.encrypt_str("legacy"),),
+    )
+    legacy = conn.execute("SELECT max(id) AS id FROM goals").fetchone()["id"]
+    _link(conn, legacy, idea_id)
+
+    overview = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)
+
+    goal = overview["goals"][0]
+    assert (goal["due_today"], goal["due"], goal["completed"]) == (False, 0, False)
+    assert overview["progress"]["due"] == 0
+    assert [e["kind"] for e in overview["timeline"]] == ["goal_created", "created"]
+
+
+def test_idea_overview_one_off_done_ahead_of_its_date(conn):
+    idea_id = dbutil.add_idea("quest")
+    early = dbutil.create_goal(conn, "parkrun", idea_ids=[idea_id], target_date="2026-09-20")
+    dbutil.set_goal_done(conn, early["id"], "2026-09-20", True)
+
+    overview = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)
+
+    assert overview["goals"][0]["completed"] is True
+    assert "goal_done" in [e["kind"] for e in overview["timeline"]]
+    assert overview["progress"]["checkoffs"] == 0  # counts once its day arrives
+
+
+# ---- pinned clock (IDEA_BANK_TODAY) ----
+
+
+class _FrozenRealClock(datetime):
+    """Stands in for the real clock: always 2030-01-01 13:14:15."""
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2030, 1, 1, 13, 14, 15)
+
+
+def test_pinned_today_replaces_only_the_date(monkeypatch):
+    monkeypatch.setattr(dbutil, "datetime", _FrozenRealClock)
+    monkeypatch.setenv("IDEA_BANK_TODAY", "2031-02-03")
+
+    assert dbutil.today_str() == "2031-02-03"
+    assert dbutil.now_str() == "2031-02-03 13:14:15"
+
+
+def test_empty_pin_means_the_real_clock(monkeypatch):
+    monkeypatch.setattr(dbutil, "datetime", _FrozenRealClock)
+    monkeypatch.setenv("IDEA_BANK_TODAY", "")
+
+    assert dbutil.now_str() == "2030-01-01 13:14:15"
+
+
+@pytest.mark.parametrize(
+    "bad_pin", ["2026-9-10", "2026-09-10T12:00:00", "tomorrow", "20260910", "2026-W37-4"]
+)
+def test_malformed_pin_raises_instead_of_using_the_real_clock(monkeypatch, bad_pin):
+    monkeypatch.setenv("IDEA_BANK_TODAY", bad_pin)
+
+    with pytest.raises(ValueError):
+        dbutil.today_str()
+
+
+def test_pinned_today_is_the_default_for_streak_stats_and_overview(conn, monkeypatch):
+    monkeypatch.setenv("IDEA_BANK_TODAY", "2031-02-03")
+    idea_id = dbutil.add_idea("x")
+    goal = dbutil.create_goal(conn, "walk", idea_ids=[idea_id], weekdays=[0, 1, 2, 3, 4, 5, 6])
+    dbutil.set_goal_done(conn, goal["id"], "2031-02-03", True)
+
+    assert dbutil.goal_stats(conn)["today"] == "2031-02-03"
+    assert dbutil.compute_streak(conn)["today_complete"] is True
+    assert dbutil.idea_overview(conn, idea_id)["goals"][0]["done_today"] is True
+
+
+def test_malformed_pin_also_breaks_timestamps(monkeypatch):
+    monkeypatch.setenv("IDEA_BANK_TODAY", "tomorrow")
+
+    with pytest.raises(ValueError):
+        dbutil.now_str()
+
+
+def test_stored_timestamps_use_the_pinned_date(conn, fixed_today):
+    idea_id = dbutil.add_idea("x")
+    goal = dbutil.create_goal(conn, "g", weekdays=[0, 1, 2, 3, 4, 5, 6])
+
+    dbutil.update_idea(conn, idea_id, {"status": "active"})
+    done = dbutil.set_goal_done(conn, goal["id"], fixed_today, True)
+
+    idea = dbutil.get_idea(conn, idea_id)
+    assert idea["created_at"].startswith(f"{fixed_today} ")
+    assert idea["updated_at"].startswith(f"{fixed_today} ")
+    assert goal["created_at"].startswith(f"{fixed_today} ")
+    assert done["completed_at"].startswith(f"{fixed_today} ")
+
+
+def test_unpinned_today_uses_the_real_clock(monkeypatch):
+    monkeypatch.delenv("IDEA_BANK_TODAY", raising=False)
+
+    before = date.today().isoformat()
+    result = dbutil.today_str()
+    after = date.today().isoformat()
+    assert result in {before, after}  # either side of a midnight rollover
+
+
+# ---- date validation ----
+
+
+@pytest.mark.parametrize("value", ["2026-09-10", "2024-02-29", "0001-01-01"])
+def test_is_iso_date_accepts_real_dates(value):
+    assert dbutil.is_iso_date(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-9-10", "20260910", "2026-13-01", "2023-02-29", "2026-09-10T00:00", " 2026-09-10", "", None, 20260910],
+)
+def test_is_iso_date_rejects_everything_else(value):
+    assert dbutil.is_iso_date(value) is False
+
+
+def test_create_goal_refuses_a_malformed_target_date(conn):
+    with pytest.raises(ValueError):
+        dbutil.create_goal(conn, "x", target_date="not-a-date")
+
+    assert conn.execute("SELECT COUNT(*) FROM goals").fetchone()[0] == 0
+
+
+def test_goals_for_idea_same_second_goals_keep_creation_order(conn):
+    idea_id = dbutil.add_idea("x")
+    for text in ("first", "second", "third"):
+        dbutil.create_goal(conn, text, idea_ids=[idea_id])
+    conn.execute("UPDATE goals SET created_at = '2026-09-10 08:00:00'")
+    conn.commit()
+
+    assert [g["text"] for g in dbutil.goals_for_idea(conn, idea_id)] == ["first", "second", "third"]
+
+
+
+def test_idea_overview_timeline_same_second_status_changes_newest_first(conn):
+    idea_id = dbutil.add_idea("quest", created_at="2026-09-01 08:00:00")
+    for old, new in (("inbox", "active"), ("active", "archive")):
+        conn.execute(
+            "INSERT INTO idea_events (idea_id, from_status, to_status, changed_at) "
+            "VALUES (?, ?, ?, '2026-09-02 09:00:00')",
+            (idea_id, old, new),
+        )
+    conn.commit()
+
+    timeline = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["timeline"]
+
+    changes = [(e["from"], e["to"]) for e in timeline if e["kind"] == "status"]
+    assert changes == [("active", "archive"), ("inbox", "active")]
+
+
+def test_idea_overview_timeline_same_second_goals_newest_first(conn):
+    idea_id = dbutil.add_idea("quest", created_at="2026-09-01 08:00:00")
+    for text in ("first", "second"):
+        dbutil.create_goal(conn, text, idea_ids=[idea_id])
+    conn.execute("UPDATE goals SET created_at = '2026-09-02 09:00:00'")
+    conn.commit()
+
+    timeline = dbutil.idea_overview(conn, idea_id, today=STATS_TODAY)["timeline"]
+
+    assert [e["goal_text"] for e in timeline if e["kind"] == "goal_created"] == ["second", "first"]
+
+
+def test_idea_overview_honours_an_explicit_today(conn):
+    idea_id = dbutil.add_idea("quest")
+    gym = _insert_recurring_goal(conn, "gym", "2026-09-01", weekdays="0")  # Mondays
+    _link(conn, gym, idea_id)
+
+    overview = dbutil.idea_overview(conn, idea_id, today="2026-09-14")  # a Monday
+
+    assert overview["today"] == "2026-09-14"
+    assert overview["goals"][0]["due_today"] is True
+    assert overview["goals"][0]["recent"][-1]["date"] == "2026-09-14"

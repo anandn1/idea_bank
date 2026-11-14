@@ -283,3 +283,74 @@ def test_print_goal_stats_recurring_goal_with_stopped_label(cli, capsys):
     out = capsys.readouterr().out
     assert "#7 (daily) walk [stopped 2026-09-04]" in out
     assert "100%  (3/3), streak 0, best 3, last done 2026-09-03" in out
+
+
+# ---- show --full rendering ----
+
+
+def _overview_goal(**overrides):
+    goal = {
+        "id": 1, "text": "walk", "weekdays": [0, 1, 2, 3, 4, 5, 6], "target_date": None,
+        "archived_at": None, "completed": False, "last_completed": None,
+        "due_today": True, "done_today": False, "streak": 2, "best_streak": 5,
+        "last_done": "2026-09-09", **_rate(3, 4),
+    }
+    return {**goal, **overrides}
+
+
+@pytest.mark.parametrize(
+    "overrides, expected",
+    [
+        ({"done_today": True}, "[x]"),
+        ({}, "[ ]"),
+        ({"due_today": False}, " - "),
+        ({"weekdays": None, "due_today": False, "completed": True}, "[x]"),
+        ({"weekdays": None, "due_today": False}, " - "),
+        # a stopped habit counts as completed, but only one-offs show [x] for that
+        ({"due_today": False, "completed": True, "archived_at": "2026-09-05 09:00:00"}, " - "),
+    ],
+)
+def test_goal_status_mark(cli, overrides, expected):
+    assert cli.goal_status_mark(_overview_goal(**overrides)) == expected
+
+
+def test_goal_progress_summary_recurring(cli):
+    assert (
+        cli.goal_progress_summary(_overview_goal(), "2026-09-10")
+        == "75%  (3/4), streak 2, best 5, last done 2026-09-09"
+    )
+
+
+def test_goal_progress_summary_recurring_never_done(cli):
+    summary = cli.goal_progress_summary(_overview_goal(last_done=None), "2026-09-10")
+    assert summary.endswith("last done never")
+
+
+@pytest.mark.parametrize(
+    "overrides, expected",
+    [
+        ({"completed": True, "last_completed": "2026-09-05", "target_date": "2026-09-05"}, "done 2026-09-05"),
+        ({"target_date": "2026-09-09"}, "missed 2026-09-09"),
+        ({"target_date": "2026-09-10"}, "due 2026-09-10"),
+        ({"target_date": "2026-09-20"}, "due 2026-09-20"),
+        ({"target_date": None}, "no date set"),
+    ],
+)
+def test_goal_progress_summary_one_off(cli, overrides, expected):
+    goal = _overview_goal(weekdays=None, **overrides)
+    assert cli.goal_progress_summary(goal, "2026-09-10") == expected
+
+
+@pytest.mark.parametrize(
+    "event, expected",
+    [
+        ({"kind": "created"}, "idea created"),
+        ({"kind": "status", "from": "inbox", "to": "active"}, "status inbox -> active"),
+        ({"kind": "goal_created", "goal_id": 4, "goal_text": "walk"}, "goal #4 created: walk"),
+        ({"kind": "goal_stopped", "goal_id": 4, "goal_text": "walk"}, "goal #4 stopped: walk"),
+        ({"kind": "goal_done", "goal_id": 4, "goal_text": "walk"}, "goal #4 done: walk"),
+    ],
+)
+def test_timeline_line(cli, event, expected):
+    line = cli.timeline_line({"at": "2026-09-10 08:30:59", **event})
+    assert line == f"  2026-09-10 08:30  {expected}"

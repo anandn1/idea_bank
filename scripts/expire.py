@@ -34,21 +34,17 @@ def expire_if_stale(conn, row, cutoff: datetime) -> bool:
     if updated_at >= cutoff:
         return False
 
-    conn.execute(
-        "UPDATE ideas SET status = 'archive', updated_at = ? WHERE id = ?",
-        (dbutil.now_str(), row["id"]),
-    )
-    log(
-        f"expired idea #{row['id']} (queued since {row['updated_at']}): {row['text']!r}"
-    )
+    dbutil.update_idea(conn, row["id"], {"status": "archive"})
+    # id and date only: idea text is encrypted at rest, and this log isn't
+    log(f"expired idea #{row['id']} (queued since {row['updated_at']})")
     return True
 
 
 def main():
-    cutoff = datetime.now() - EIGHT_WEEKS
+    cutoff = dbutil.now() - EIGHT_WEEKS
     with dbutil.connection() as conn:
         rows = conn.execute(
-            "SELECT id, text, updated_at FROM ideas WHERE status = 'queued'"
+            "SELECT id, updated_at FROM ideas WHERE status = 'queued'"
         ).fetchall()
 
         expired = sum(expire_if_stale(conn, row, cutoff) for row in rows)

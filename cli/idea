@@ -55,6 +55,13 @@ def add_status_flags(parser: argparse.ArgumentParser, help_verb: str, dest: str 
     )
 
 
+def iso_date_arg(value: str) -> str:
+    """argparse type for --date: rejects anything but a real YYYY-MM-DD."""
+    if not dbutil.is_iso_date(value):
+        raise argparse.ArgumentTypeError(f"not a YYYY-MM-DD date: {value!r}")
+    return value
+
+
 def add_json_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--json", action="store_true",
@@ -302,9 +309,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     show = subparsers.add_parser(
         "show", help="show one or more ideas in full",
-        description="Show one or more ideas' full text, status, and timestamps.",
+        description=(
+            "Show one or more ideas' full text, status, and timestamps. "
+            "--full adds everything the GUI's idea view shows: each linked "
+            "goal's completion rate, streaks and last 12 weeks, overall "
+            "progress, and an activity timeline (status changes are recorded "
+            "from when this feature was added)."
+        ),
     )
     show.add_argument("ids", type=int, nargs="+", metavar="id", help="idea id(s)")
+    show.add_argument(
+        "--full", action="store_true",
+        help="include goal progress, streaks and the activity timeline",
+    )
     add_json_flag(show)
 
     move = subparsers.add_parser(
@@ -399,7 +416,7 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     goal_add.add_argument(
-        "--date", metavar="YYYY-MM-DD",
+        "--date", metavar="YYYY-MM-DD", type=iso_date_arg,
         help="one-off target date, any date at all (default: today; not valid with --weekdays)",
     )
     add_json_flag(goal_add)
@@ -408,20 +425,20 @@ def build_parser() -> argparse.ArgumentParser:
         "done", help="mark one or more goals complete for a day",
     )
     goal_done.add_argument("ids", type=int, nargs="+", metavar="id")
-    goal_done.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
+    goal_done.add_argument("--date", metavar="YYYY-MM-DD", type=iso_date_arg, help="default: today")
     add_json_flag(goal_done)
 
     goal_undo = goal_sub.add_parser(
         "undo", help="unmark one or more goals as complete for a day",
     )
     goal_undo.add_argument("ids", type=int, nargs="+", metavar="id")
-    goal_undo.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
+    goal_undo.add_argument("--date", metavar="YYYY-MM-DD", type=iso_date_arg, help="default: today")
     add_json_flag(goal_undo)
 
     goal_list = goal_sub.add_parser(
         "list", help="show a day's due goals and completion",
     )
-    goal_list.add_argument("--date", metavar="YYYY-MM-DD", help="default: today")
+    goal_list.add_argument("--date", metavar="YYYY-MM-DD", type=iso_date_arg, help="default: today")
     add_json_flag(goal_list)
 
     goal_stop = goal_sub.add_parser(
@@ -584,6 +601,8 @@ def cmd_list(args) -> int:
 
 
 def cmd_show(args) -> int:
+    if args.full:
+        return cmd_show_full(args)
     with dbutil.connection() as conn:
         missing = missing_ids(conn, args.ids)
         if missing:
@@ -620,6 +639,91 @@ def cmd_show(args) -> int:
     return 0
 
 
+def goal_status_mark(goal: dict) -> str:
+    """[x] done today (or a completed one-off), [ ] due today and not done
+    yet, a dash when nothing's due today."""
+    if goal["done_today"] or (goal["weekdays"] is None and goal["completed"]):
+        return "[x]"
+    return "[ ]" if goal["due_today"] else " - "
+
+
+def goal_progress_summary(goal: dict, today: str) -> str:
+    if goal["weekdays"] is not None:
+        return (
+            f"{format_rate(goal).strip()}, streak {goal['streak']}, "
+            f"best {goal['best_streak']}, last done {goal['last_done'] or 'never'}"
+        )
+    if goal["completed"]:
+        return f"done {goal['last_completed']}"
+    if goal["target_date"] is None:
+        return "no date set"  # old rows can lack one; such a goal is never due
+    if goal["target_date"] < today:
+        return f"missed {goal['target_date']}"
+    return f"due {goal['target_date']}"
+
+
+TIMELINE_DESCRIPTIONS = {
+    "created": lambda e: "idea created",
+    "status": lambda e: f"status {e['from']} -> {e['to']}",
+    "goal_created": lambda e: f"goal #{e['goal_id']} created: {e['goal_text']}",
+    "goal_stopped": lambda e: f"goal #{e['goal_id']} stopped: {e['goal_text']}",
+    "goal_done": lambda e: f"goal #{e['goal_id']} done: {e['goal_text']}",
+}
+TIMESTAMP_TO_MINUTE = len("YYYY-MM-DD HH:MM")
+
+
+def timeline_line(event: dict) -> str:
+    what = TIMELINE_DESCRIPTIONS[event["kind"]](event)
+    return f"  {event['at'][:TIMESTAMP_TO_MINUTE]}  {what}"
+
+
+def print_idea_overview(overview: dict) -> None:
+    idea, progress = overview["idea"], overview["progress"]
+    print(f"#{idea['id']} [{idea['status']}] {idea['text']}")
+    print(f"  created {idea['created_at']}   updated {idea['updated_at']}")
+    print(
+        f"  progress  {rate_bar(progress)}  {format_rate(progress).strip()}"
+        f"   check-offs {progress['checkoffs']}"
+    )
+    if idea["fields"]:
+        print("\nfields")
+        for key, value in idea["fields"].items():
+            print(f"  {key}: {value}")
+    print("\ngoals")
+    if not overview["goals"]:
+        print("  none linked")
+    for goal in overview["goals"]:
+        stopped = f" [stopped {goal['archived_at'][:10]}]" if goal["archived_at"] else ""
+        print(
+            f"  {goal_status_mark(goal)} #{goal['id']} ({format_weekdays(goal['weekdays'])}) "
+            f"{goal['text']}{stopped}\n      {goal_progress_summary(goal, overview['today'])}"
+        )
+    if idea["notes"]:
+        print("\nnotes")
+        for line in idea["notes"].splitlines():
+            print(f"  {line}".rstrip())
+    print("\ntimeline")
+    for event in overview["timeline"]:
+        print(timeline_line(event))
+
+
+def cmd_show_full(args) -> int:
+    with dbutil.connection() as conn:
+        missing = missing_ids(conn, args.ids)
+        if missing:
+            return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
+        overviews = [dbutil.idea_overview(conn, idea_id) for idea_id in args.ids]
+
+    if args.json:
+        print(json.dumps(overviews[0] if len(overviews) == 1 else overviews))
+        return 0
+    for i, overview in enumerate(overviews):
+        if i > 0:
+            print()
+        print_idea_overview(overview)
+    return 0
+
+
 def cmd_move(args) -> int:
     ids, status = parse_ids_and_status(args.ids, args.status_flag)
     if ids is None:
@@ -629,13 +733,7 @@ def cmd_move(args) -> int:
         missing = missing_ids(conn, ids)
         if missing:
             return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
-        now = dbutil.now_str()
-        conn.executemany(
-            "UPDATE ideas SET status = ?, updated_at = ? WHERE id = ?",
-            [(status, now, idea_id) for idea_id in ids],
-        )
-        conn.commit()
-        ideas = [dbutil.get_idea(conn, idea_id) for idea_id in ids]
+        ideas = [dbutil.update_idea(conn, idea_id, {"status": status}) for idea_id in ids]
     emit_ideas(args, ideas, "moved")
     return 0
 
@@ -685,9 +783,7 @@ def cmd_delete(args) -> int:
         if missing:
             return fail(args, f"no idea(s) with id(s): {', '.join(map(str, missing))}")
         for idea_id in args.ids:
-            dbutil.unlink_goals_from_idea(conn, idea_id)
-        conn.executemany("DELETE FROM ideas WHERE id = ?", [(i,) for i in args.ids])
-        conn.commit()
+            dbutil.delete_idea(conn, idea_id)
 
     if args.json:
         results = [{"deleted": True, "id": i} for i in args.ids]

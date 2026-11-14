@@ -1279,7 +1279,7 @@ button.goal-idea-chip-label:hover {
 
 .modal {
   width: 100%;
-  max-width: 560px;
+  max-width: 720px;
   max-height: 85vh;
   overflow-y: auto;
   background: var(--paper);
@@ -1513,6 +1513,202 @@ button.goal-idea-chip-label:hover {
   border-color: var(--flame);
 }
 
+/* ---- notes: rendered markdown read view, textarea only while editing
+   (see createNotesEditor in markdown.js). Styled like a terminal pager:
+   headings keep their hashes as a dim marker, task items use the same
+   [ ]/[x] glyphs as goal checkboxes, links wear cobalt (the idea-link
+   color). ---- */
+
+.modal-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.notes-toggle {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 1.5px solid var(--ink-dim);
+  border-radius: 0;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.notes-toggle:hover,
+.notes-toggle:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.notes-toggle[aria-pressed="true"] {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.notes-view[hidden],
+.modal-notes[hidden] {
+  display: none;
+}
+
+.notes-view {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  border-left: 3px solid var(--paper-dim);
+  padding: 2px 0 2px 14px;
+  overflow-wrap: anywhere;
+}
+
+.notes-view > :first-child { margin-top: 0; }
+.notes-view > :last-child { margin-bottom: 0; }
+
+.notes-view p {
+  margin: 0 0 10px;
+}
+
+.notes-view .md-h {
+  margin: 18px 0 8px;
+  font-weight: 800;
+  line-height: 1.3;
+  color: var(--ink);
+}
+
+.notes-view .md-h1 { font-size: 17px; }
+.notes-view .md-h2 { font-size: 15px; }
+.notes-view .md-h3,
+.notes-view .md-h4,
+.notes-view .md-h5,
+.notes-view .md-h6 { font-size: 13px; }
+
+.notes-view .md-h-mark {
+  color: var(--flame);
+  font-weight: 500;
+}
+
+.notes-view ul,
+.notes-view ol {
+  margin: 0 0 10px;
+  padding-left: 3ch;
+}
+
+.notes-view li > ul,
+.notes-view li > ol {
+  margin: 2px 0 0;
+}
+
+.notes-view li > p {
+  margin-bottom: 2px;
+}
+
+.notes-view ul {
+  list-style: "- ";
+}
+
+.notes-view li::marker {
+  color: var(--ink-dim);
+}
+
+/* task items: the [ ]/[x] glyph (see markdown.js) replaces the bullet */
+.notes-view li:has(> .md-task-mark, > p:first-child > .md-task-mark) {
+  list-style: none;
+  margin-left: -3ch;
+}
+
+.notes-view .md-task-mark {
+  font-weight: 700;
+  color: var(--ink-dim);
+  margin-right: 1ch;
+}
+
+.notes-view .md-task-mark.done {
+  color: var(--moss);
+}
+
+.notes-view code {
+  font-family: var(--mono);
+  font-size: 12px;
+  background: var(--paper-dim);
+  padding: 1px 4px;
+}
+
+.notes-view pre {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  background: var(--paper-dim);
+  overflow-x: auto;
+}
+
+.notes-view pre code {
+  padding: 0;
+  background: none;
+}
+
+.notes-view blockquote {
+  margin: 0 0 10px;
+  padding-left: 12px;
+  border-left: 3px solid var(--cobalt);
+  color: var(--ink-dim);
+}
+
+.notes-view hr {
+  border: none;
+  border-top: 1.5px dashed var(--ink-dim);
+  margin: 16px 0;
+}
+
+.notes-view a {
+  color: var(--cobalt);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+}
+
+.notes-view table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.notes-view th,
+.notes-view td {
+  border: 1.5px solid var(--paper-dim);
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.notes-view th[align="center"],
+.notes-view td[align="center"] { text-align: center; }
+.notes-view th[align="right"],
+.notes-view td[align="right"] { text-align: right; }
+
+.notes-view th {
+  font-weight: 800;
+  border-bottom-color: var(--ink-dim);
+}
+
+.notes-view img {
+  max-width: 100%;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .modal-meta {
   font-family: var(--mono);
   font-size: 11px;
@@ -1580,23 +1776,550 @@ button.goal-idea-chip-label:hover {
 .modal-done:hover { transform: translate(1.5px, 1.5px); box-shadow: 1.5px 1.5px 0 var(--flame); }
 .modal-done:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--flame); }
 
-/* ---- standalone idea window (idea.html): the modal's own markup, popped
-   out into a real window instead of an in-board overlay -- so it's just
-   the .modal box centered on a page with no backdrop to dim. ---- */
+/* ---- full idea view (idea.html): everything about one idea on its own
+   page, styled as a game status screen in the app's own ink-and-paper
+   terms: an offset-shadow hero card with a segmented progress bar, and
+   panels whose titles are inverted ink bars with a flame notch. Colors
+   keep their roles -- moss is done, flame is the active/current thing. ---- */
 
-body.standalone-idea {
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
+body.idea-view-page {
+  display: block;
+  overflow-y: auto;
 }
 
-body.standalone-idea .modal {
-  width: 100%;
+body.idea-view-page .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
-.standalone-notice {
+.view-back {
+  text-decoration: none;
+}
+
+.view-back:hover .prompt,
+.view-back:focus-visible .prompt {
+  color: var(--ink);
+}
+
+.view-cmd {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.view-save-state {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-dim);
+}
+
+.view-save-state.error {
+  color: var(--flame);
+}
+
+.idea-view {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px 20px 70px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+
+.idea-view[hidden],
+.view-notice[hidden] {
+  display: none;
+}
+
+.view-notice {
+  max-width: 600px;
+  margin: 80px auto;
+  padding: 0 20px;
   font-size: 13px;
   color: var(--ink-dim);
+}
+
+/* hero card */
+
+.view-hero {
+  border: 3px solid var(--ink);
+  box-shadow: 6px 6px 0 var(--ink);
+  padding: 18px 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.view-hero-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 20px;
+}
+
+.view-eyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--flame);
+}
+
+.view-status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.view-status-pills .target-pill.selected {
+  color: var(--paper);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
+.view-title {
+  width: 100%;
+  resize: none;
+  overflow: hidden;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  padding: 2px 0;
+}
+
+.view-title:focus {
+  outline: 2px dashed var(--flame);
+  outline-offset: 4px;
+}
+
+.view-meta {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.xp {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.xp-bar {
+  flex: 1 1 320px;
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 2px solid var(--ink);
+}
+
+.xp-seg {
+  flex: 1;
+  height: 14px;
+  background: var(--paper-dim);
+}
+
+.xp-seg.on {
+  background: var(--moss);
+}
+
+.xp-label {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.xp-label strong {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.view-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 34px;
+  padding-top: 4px;
+}
+
+.view-tile-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.view-tile.accent .view-tile-value {
+  color: var(--flame);
+}
+
+.view-tile-label {
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+/* layout: sidebar (chapters, fields, timeline) beside the main column */
+
+.view-grid {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  gap: 30px;
+  align-items: start;
+}
+
+.view-side {
+  position: sticky;
+  top: 84px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 0 4px 4px 0;
+}
+
+.view-main {
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .view-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .view-side {
+    position: static;
+    max-height: none;
+    order: 2;
+  }
+}
+
+/* panels */
+
+.panel {
+  border: 2px solid var(--ink);
+}
+
+.panel[hidden] {
+  display: none;
+}
+
+.panel-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 5px 10px;
+  background: var(--ink);
+  color: var(--paper);
+  border-left: 6px solid var(--flame);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.panel-count {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  opacity: 0.75;
+}
+
+.panel-title .notes-toggle {
+  margin-left: auto;
+  color: var(--paper);
+  border-color: var(--paper);
+  text-transform: lowercase;
+  letter-spacing: 0;
+}
+
+.panel-title .notes-toggle[aria-pressed="true"] {
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.panel-body {
+  padding: 14px 16px;
+}
+
+.panel-empty {
+  margin: 0;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.objectives > .panel-empty {
+  padding: 14px 16px;
+}
+
+.panel-action {
+  margin-top: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-dim);
+  background: none;
+  border: 1.5px dashed var(--ink-dim);
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.panel-action:hover,
+.panel-action:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+/* chapters */
+
+.chapter-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+}
+
+.chapter a {
+  display: flex;
+  gap: 10px;
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.chapter a:hover,
+.chapter a:focus-visible {
+  background: var(--paper-dim);
+}
+
+.chapter-num {
+  color: var(--flame);
+  font-weight: 700;
+}
+
+.chapter.top .chapter-name {
+  font-weight: 800;
+}
+
+.chapter:not(.top) .chapter-name {
+  padding-left: 1ch;
+}
+
+/* fields: a stat sheet */
+
+.sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sheet-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.sheet-key,
+.sheet-value {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-bottom: 1.5px solid var(--paper-dim);
+  padding: 5px 2px;
+}
+
+.sheet-key {
+  color: var(--ink-dim);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10.5px;
+}
+
+.sheet-key:focus,
+.sheet-value:focus {
+  outline: none;
+  border-bottom-color: var(--flame);
+}
+
+.sheet-remove {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.sheet-remove:hover,
+.sheet-remove:focus-visible {
+  color: var(--flame);
+}
+
+/* timeline */
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.timeline-item {
+  display: grid;
+  grid-template-columns: 2ch minmax(0, 1fr) auto;
+  gap: 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.timeline-glyph {
+  font-weight: 800;
+  color: var(--ink-dim);
+}
+
+.timeline-item.kind-status .timeline-glyph { color: var(--flame); }
+.timeline-item.kind-goal_done .timeline-glyph { color: var(--moss); }
+.timeline-item.kind-goal_created .timeline-glyph { color: var(--cobalt); }
+
+.timeline-what {
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.timeline-when {
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+/* objectives (linked goals) */
+
+.objective {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 14px 16px;
+  border-bottom: 1.5px solid var(--paper-dim);
+}
+
+.objective:last-child {
+  border-bottom: none;
+}
+
+.objective .goal-check {
+  font-size: 14px;
+}
+
+.objective .goal-check:disabled {
+  cursor: default;
+}
+
+.objective-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.objective-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.objective-text {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.objective.finished .objective-text {
+  color: var(--ink-dim);
+}
+
+.objective-stats {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) 3.2em 5em;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.objective-rate {
+  text-align: right;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.objective-count {
+  color: var(--ink-dim);
+}
+
+.objective-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 11.5px;
+  color: var(--ink-dim);
+}
+
+.objective-meta .accent {
+  color: var(--flame);
+  font-weight: 700;
+}
+
+.objective-group-label {
+  padding: 8px 16px 0;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  border-top: 2px solid var(--ink);
+}
+
+.mini-heatmap {
+  --cell: 8px;
+  display: grid;
+  grid-template-rows: repeat(7, var(--cell));
+  grid-auto-flow: column;
+  grid-auto-columns: var(--cell);
+  gap: 2px;
+}
+
+@media (max-width: 560px) {
+  .objective {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .mini-heatmap {
+    grid-column: 2;
+  }
+}
+
+.view-danger {
+  display: flex;
+  justify-content: flex-end;
 }
 
 @media (prefers-reduced-motion: reduce) {
