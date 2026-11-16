@@ -149,14 +149,37 @@ def base_url(gui_db_path):
         server.wait(timeout=5)
 
 
+BROWSER_SETUP = (
+    "install it with `uv pip install -r requirements-dev.txt` and "
+    "`.venv/bin/playwright install --only-shell chromium`, "
+    "or run pytest with --skip-browser-tests"
+)
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--skip-browser-tests",
+        action="store_true",
+        help="skip the Playwright browser tests (they include the notes sanitizer's security tests)",
+    )
+
+
+# The browser tests hold the notes sanitizer's security tests, so a missing
+# browser fails the run rather than quietly skipping them; skipping takes
+# an explicit --skip-browser-tests.
 @pytest.fixture(scope="session")
-def browser():
-    sync_api = pytest.importorskip("playwright.sync_api")
+def browser(request):
+    if request.config.getoption("--skip-browser-tests"):
+        pytest.skip("--skip-browser-tests given")
+    try:
+        from playwright import sync_api
+    except ImportError:
+        pytest.fail(f"Playwright is not installed: {BROWSER_SETUP}", pytrace=False)
     with sync_api.sync_playwright() as playwright:
         try:
             launched = playwright.chromium.launch()
         except sync_api.Error as error:
-            pytest.skip(f"Playwright browser not installed: {error}")
+            pytest.fail(f"Playwright's Chromium is not installed ({error}): {BROWSER_SETUP}", pytrace=False)
         yield launched
         launched.close()
 
@@ -165,6 +188,9 @@ def browser():
 def page(browser):
     """A fresh page; `page.errors` collects any uncaught page errors."""
     context = browser.new_context(viewport={"width": 1280, "height": 900})
+    # Only the test server is reachable: a sanitizer regression must not
+    # make the browser fetch a real site (the tests watch requests instead).
+    context.route(lambda url: not url.startswith("http://127.0.0.1"), lambda route: route.abort())
     new_page = context.new_page()
     errors = []
     new_page.on("pageerror", lambda error: errors.append(str(error)))

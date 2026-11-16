@@ -3,6 +3,8 @@ idea view (idea.html) and the board's detail modal. They cover what can't
 run under Node -- sanitizing (DOMPurify), link targets, and the read/edit
 toggle. Fixtures (base_url, page) are in conftest.py."""
 
+import pytest
+
 from gui_support import get_idea, make_idea
 
 QUEST_NOTES = "# Quest\nwalk **daily**\n\n- [x] shoes\n- [ ] week 1\n\n[map](https://example.com/route)"
@@ -54,7 +56,7 @@ def test_hostile_notes_run_no_code_and_keep_no_dangerous_markup(page, base_url):
     assert not [
         v for name, v in attributes if name == "href" and "javascript:" in v.lower()
     ]
-    assert view.locator("h3").inner_text() == "# evil"
+    assert view.locator("h3 .md-h-text").inner_text() == "evil"
 
 
 def test_notes_cannot_add_form_controls_or_element_ids(page, base_url):
@@ -124,9 +126,140 @@ def test_notes_keep_the_renderers_own_classes(page, base_url):
     html = _sanitized(page, "# Title\n\n- [x] done task")
 
     assert 'class="md-h md-h1"' in html
-    assert 'class="md-h-mark"' in html
+    assert 'class="md-h-text"' in html
     assert 'class="md-task-mark done"' in html
     assert 'class="sr-only"' in html
+
+
+def test_notes_keep_callout_and_data_block_classes(page, base_url):
+    page.goto(base_url + "/")
+
+    html = _sanitized(page, "> [!ALARM] late\n> fix it\n\n```schedule\nday | A\nMon | 2\n```")
+
+    for kept in [
+        'class="md-callout md-tone-flame"',
+        'class="md-callout-kind"',
+        'class="md-callout-text"',
+        'class="nb-block nb-schedule"',
+        'class="nb-heat"',
+    ]:
+        assert kept in html
+
+
+def test_a_note_cannot_borrow_renderer_classes_for_other_markup(page, base_url):
+    page.goto(base_url + "/")
+
+    html = _sanitized(page, '<div class="nb-block modal-backdrop">x</div>')
+
+    assert 'class="nb-block"' in html
+    assert "modal-backdrop" not in html
+
+
+def test_notes_cannot_set_a_background_image(page, base_url):
+    page.goto(base_url + "/")
+
+    html = _sanitized(page, '<table background="https://evil.example/bg.png"><tr><td>x</td></tr></table>')
+
+    assert "background" not in html
+    assert "evil" not in html
+
+
+def _bar_styles(page, markdown):
+    return page.evaluate(
+        """(source) => {
+          const div = document.createElement("div");
+          div.append(IdeaMarkdown.renderMarkdown(source, "2026-11-16"));
+          return {
+            bars: [...div.querySelectorAll(".nb-pos")].map((n) => [n.style.left, n.style.width]),
+            cols: [...div.querySelectorAll(".nb-schedule")].map((n) => n.style.getPropertyValue("--nb-cols")),
+          };
+        }""",
+        markdown,
+    )
+
+
+def test_data_block_bars_are_placed_from_their_data(page, base_url):
+    page.goto(base_url + "/")
+
+    styles = _bar_styles(page, "```phases\nP1 | 2026-11-09 | 2026-11-15\nP2 | 2026-11-16 | 2026-11-22\n```")
+
+    segments = styles["bars"][:2]
+    assert segments == [["0%", "50%"], ["50%", "50%"]]
+
+
+def test_a_schedule_sets_its_column_count(page, base_url):
+    page.goto(base_url + "/")
+
+    styles = _bar_styles(page, "```schedule\nday | A | B | C\nMon | 1 | 2 | 3\n```")
+
+    assert styles["cols"] == ["3"]
+
+
+def test_raw_html_bar_positions_stay_inside_their_block(page, base_url):
+    page.goto(base_url + "/")
+
+    styles = _bar_styles(
+        page,
+        '<span class="nb-pos" data-left="-50" data-width="900"></span>'
+        '<span class="nb-pos" data-left="junk"></span>'
+        '<div class="nb-schedule" data-cols="500"></div><div class="nb-schedule" data-cols="0"></div>',
+    )
+
+    assert styles["bars"] == [["0%", "100%"], ["0%", ""]]
+    assert styles["cols"] == ["24", "1"]
+
+
+# ---- section task counts ----
+
+
+def _task_counts(page, markdown):
+    return page.evaluate(
+        """(source) => {
+          const div = document.createElement("div");
+          div.append(IdeaMarkdown.renderMarkdown(source));
+          return [...div.querySelectorAll(".md-h")].map((h) => {
+            const count = h.querySelector(".md-h-count");
+            return count ? [count.textContent, count.classList.contains("complete")] : null;
+          });
+        }""",
+        markdown,
+    )
+
+
+def test_each_heading_counts_the_tasks_under_it(page, base_url):
+    page.goto(base_url + "/")
+
+    counts = _task_counts(
+        page, "# One\n- [x] a\n- [ ] b\n- [ ] c\n\n# Two\n- [x] d\n- [x] e\n\n# Three\nno tasks"
+    )
+
+    assert counts == [["1/3", False], ["✓ 2/2", True], None]
+
+
+def test_a_sub_heading_starts_its_own_count(page, base_url):
+    page.goto(base_url + "/")
+
+    counts = _task_counts(page, "# Top\n- [x] a\n\n### Sub\n- [ ] b")
+
+    assert counts == [["✓ 1/1", True], ["0/1", False]]
+
+
+def test_tasks_before_the_first_heading_and_nested_tasks(page, base_url):
+    page.goto(base_url + "/")
+
+    counts = _task_counts(page, "- [ ] loose\n\n# Plan\n- [x] a\n  - [ ] nested")
+
+    assert counts == [["1/2", False]]
+
+
+def test_task_count_is_shown_in_the_view_with_a_readable_title(page, base_url):
+    idea = make_idea(base_url, "counted", "## Setup\n- [x] shoes\n- [ ] route")
+
+    open_view(page, base_url, idea["id"])
+
+    count = page.locator(f"{VIEW} .md-h-count")
+    assert count.inner_text() == "1/2"
+    assert count.get_attribute("title") == "1 of 2 tasks done"
 
 
 def test_notes_load_nothing_from_other_sites(page, base_url):
@@ -146,6 +279,67 @@ def test_notes_load_nothing_from_other_sites(page, base_url):
 
     assert "evil.example" not in html
     assert requests == []
+
+
+def test_notes_load_nothing_via_url_tricks(page, base_url):
+    page.goto(base_url + "/")
+    requests = []
+    page.on("request", lambda r: requests.append(r.url) if "evil" in r.url else None)
+
+    html = _sanitized(
+        page,
+        '<img src="/\\evil.example/a.png"><img src="\\\\evil.example/b.png">'
+        '<img src="/\t/evil.example/c.png"><img src="ht\ttps://evil.example/d.png">'
+        '<svg><filter><feImage href="https://evil.example/e.png"></feImage></filter></svg>',
+    )
+    page.wait_for_timeout(300)
+
+    assert requests == []
+    assert "evil" not in html
+
+
+def test_svg_paint_and_effects_cannot_point_at_other_files(page, base_url):
+    page.goto(base_url + "/")
+
+    html = _sanitized(
+        page,
+        '<svg><rect fill="url(https://evil.example/p.svg#g)" filter="url(\'//evil.example/f.svg#f\')"'
+        ' mask="url( /static/m.svg#m)" stroke="url(#local)"/></svg>',
+    )
+
+    assert "evil" not in html
+    assert "m.svg" not in html
+    assert 'stroke="url(#local)"' in html
+
+
+def test_other_svg_elements_cannot_link_to_other_files(page, base_url):
+    page.goto(base_url + "/")
+    requests = []
+    page.on("request", lambda r: requests.append(r.url) if "evil" in r.url else None)
+
+    html = page.evaluate("""() => {
+          const div = document.createElement('div');
+          document.body.append(div);  // attached, so the browser would really load them
+          div.append(IdeaMarkdown.renderMarkdown(
+            '<svg><defs><pattern id="p" href="https://evil.example/p.svg#x"/>' +
+            '<linearGradient xlink:href="https://evil.example/g.svg#g"/></defs>' +
+            '<text><textPath href="https://evil.example/t.svg#t">t</textPath></text>' +
+            '<linearGradient xlink:href="#local"/></svg>'));
+          return div.innerHTML;
+        }""")
+    page.wait_for_timeout(300)
+
+    assert "evil" not in html
+    assert requests == []
+    assert 'xlink:href="#local"' in html
+
+
+def test_embedded_images_must_be_images(page, base_url):
+    page.goto(base_url + "/")
+
+    html = _sanitized(page, '<img src="data:text/html,<b>x</b>">')
+
+    assert "src=" not in html
 
 
 def test_notes_keep_local_and_embedded_images(page, base_url):
@@ -182,6 +376,20 @@ def test_links_open_in_a_new_window_except_in_page_anchors(page, base_url):
     ]
 
 
+def test_svg_links_written_with_xlink_also_open_in_a_new_window(page, base_url):
+    page.goto(base_url + "/")
+
+    link = page.evaluate("""() => {
+          const div = document.createElement('div');
+          div.append(IdeaMarkdown.renderMarkdown(
+            '<svg><a xlink:href="https://x.example"><text>t</text></a></svg>'));
+          const a = div.querySelector('a');
+          return [a.getAttribute('xlink:href'), a.getAttribute('target'), a.getAttribute('rel')];
+        }""")
+
+    assert link == ["https://x.example", "_blank", "noopener noreferrer"]
+
+
 # ---- read/edit toggle (full idea view) ----
 
 
@@ -195,7 +403,7 @@ def test_notes_open_in_rendered_read_view(page, base_url):
     assert page.inner_text(TOGGLE) == "edit"
     assert page.get_attribute(TOGGLE, "aria-pressed") == "false"
     view = page.locator(VIEW)
-    assert view.locator("h3").inner_text() == "# Quest"
+    assert view.locator("h3 .md-h-text").inner_text() == "Quest"
     assert view.locator("strong").inner_text() == "daily"
     assert view.locator(".md-task-mark").all_inner_texts() == ["[x]", "[ ]"]
     assert page.errors == []
@@ -232,7 +440,7 @@ def test_edit_then_preview_renders_the_edited_text(page, base_url):
     page.click(TOGGLE)
 
     assert page.is_hidden(EDITOR)
-    assert page.locator(f"{VIEW} h4").inner_text() == "## Renamed"
+    assert page.locator(f"{VIEW} h4 .md-h-text").inner_text() == "Renamed"
     assert page.inner_text(TOGGLE) == "edit"
 
 
@@ -263,6 +471,19 @@ def test_editor_grows_with_long_notes(page, base_url):
     assert rows_tall > 10
 
 
+def test_editor_stops_growing_at_most_of_the_window(page, base_url):
+    long_notes = "\n".join(f"- line {n}" for n in range(300))
+    idea = make_idea(base_url, "very long", long_notes)
+    open_view(page, base_url, idea["id"])
+
+    page.click(TOGGLE)
+
+    height, window_height = page.evaluate(
+        "[document.getElementById('notes-editor').getBoundingClientRect().height, window.innerHeight]"
+    )
+    assert height == pytest.approx(window_height * 0.6, abs=1)
+
+
 def test_editor_keeps_growing_while_typing(page, base_url):
     idea = make_idea(base_url, "growing")
     open_view(page, base_url, idea["id"])  # empty notes: editor already open
@@ -280,7 +501,7 @@ def test_board_modal_renders_notes_and_saves_edits(page, base_url):
     idea = make_idea(base_url, "board quest", QUEST_NOTES)
     open_board_modal(page, base_url, idea["id"])
 
-    assert page.locator("#modal-notes-view h3").inner_text() == "# Quest"
+    assert page.locator("#modal-notes-view h3 .md-h-text").inner_text() == "Quest"
     page.click("#modal-notes-toggle")
     page.fill("#modal-notes", "# Updated\nline two")
     with page.expect_response(lambda r: r.request.method == "PATCH"):
@@ -320,7 +541,7 @@ def test_board_modal_first_idea_notes_render_before_switching(page, base_url):
 
     open_board_modal(page, base_url, first["id"])
 
-    assert page.locator("#modal-notes-view h3").inner_text() == "# First notes"
+    assert page.locator("#modal-notes-view h3 .md-h-text").inner_text() == "First notes"
 
 
 def test_board_modal_clearing_notes_saves_them_as_empty(page, base_url):

@@ -451,10 +451,20 @@ $("field-add").addEventListener("click", () => {
 
 // ---- chapters: the notes' # and ## headings, numbered in reading order ----
 
+// The heading's own text, without the task count added after it. Raw HTML
+// with a heading class has no .md-h-text, so the count is cut from a copy.
+function chapterName(heading) {
+  const text = heading.querySelector(".md-h-text");
+  if (text) return text.textContent.trim();
+  const copy = heading.cloneNode(true);
+  for (const count of copy.querySelectorAll(".md-h-count")) count.remove();
+  return copy.textContent.trim();
+}
+
 function renderChapters(notesViewEl) {
   const list = $("chapter-list");
   list.replaceChildren();
-  const headings = [...notesViewEl.querySelectorAll(".md-h1, .md-h2")];
+  const headings = [...notesViewEl.querySelectorAll(":scope > .md-h1, :scope > .md-h2")];
   $("panel-chapters").hidden = headings.length === 0;
   headings.forEach((heading, index) => {
     heading.id = `chapter-${index + 1}`;
@@ -463,7 +473,7 @@ function renderChapters(notesViewEl) {
     link.href = `#${heading.id}`;
     link.append(
       el("span", "chapter-num", String(index + 1).padStart(2, "0")),
-      el("span", "chapter-name", heading.textContent.replace(/^#+\s*/, ""))
+      el("span", "chapter-name", chapterName(heading))
     );
     item.appendChild(link);
     list.appendChild(item);

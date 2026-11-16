@@ -232,9 +232,42 @@ def test_chapters_list_notes_headings_and_jump_to_them(page, base_url):
         "02\nPhase 1",
         "03\nPhase 2",
     ]
+    assert page.evaluate("[...document.querySelectorAll('.chapter')].map((e) => e.className)") == [
+        "chapter top",
+        "chapter",
+        "chapter",
+    ]
     page.locator(".chapter a").nth(2).click()
     assert page.evaluate("location.hash") == "#chapter-3"
-    assert page.locator("#chapter-3").inner_text() == "## Phase 2"
+    assert page.locator("#chapter-3 .md-h-text").inner_text() == "Phase 2"
+
+
+def test_raw_html_with_a_heading_class_does_not_break_the_view(page, base_url):
+    idea = make_idea(base_url, "fake chapter", '# Real\n\n<div class="md-h md-h2">fake</div>\n\n- [x] task')
+
+    open_view(page, base_url, idea["id"])
+
+    assert page.errors == []
+    assert page.locator(".chapter").all_inner_texts() == ["01\nReal", "02\nfake"]
+
+
+def test_a_heading_quoted_inside_a_callout_is_not_a_chapter(page, base_url):
+    idea = make_idea(base_url, "callout heading", "# Top\n\n> [!NOTE]\n> # Inside\n\n## Next")
+
+    open_view(page, base_url, idea["id"])
+
+    assert page.locator(".chapter").all_inner_texts() == ["01\nTop", "02\nNext"]
+
+
+def test_chapters_follow_the_notes_after_an_edit(page, base_url):
+    idea = make_idea(base_url, "rechaptered", "# One")
+    open_view(page, base_url, idea["id"])
+
+    page.click("#notes-toggle")
+    page.fill("#notes-editor", "# One\n## Two")
+    page.click("#notes-toggle")
+
+    assert page.locator(".chapter").all_inner_texts() == ["01\nOne", "02\nTwo"]
 
 
 def test_chapters_panel_hidden_without_headings(page, base_url):
