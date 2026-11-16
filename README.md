@@ -13,7 +13,7 @@ Runs entirely on `localhost` with zero external network requests, no user accoun
 - **Structured Idea Lifecycle**: Organize thoughts into distinct stages:
   `inbox` &rarr; `active` &rarr; `queued` &rarr; `horizon` &rarr; `frontier` &rarr; `archive`.
 - **Encrypted at Rest**: All idea text, field notes, and goal contents are encrypted using Fernet (AES-128-CBC + HMAC-SHA256). The encryption key is kept securely on your local system (`~/.config/idea-bank/secret.key`).
-- **Keyboard-Driven & Responsive**: Fast keyboard shortcuts (`j`/`k`, `/`, status toggles), interactive drag-and-drop organization, and detachable pop-out editor windows.
+- **Keyboard-Driven & Responsive**: Fast keyboard shortcuts (`j`/`k`, `/`, status toggles), interactive drag-and-drop organization, and a full-page view for any idea.
 - **Automation & Scripting Ready**: Subcommands support `--json` output and standardized exit codes for easy scripting and tooling integrations.
 
 ---
@@ -82,6 +82,7 @@ idea list -q                             # List only queued ideas
 idea list --json                         # Format output as JSON
 
 idea show 42                             # Inspect idea #42
+idea show 42 --full                      # Everything: goal progress, streaks, timeline
 idea edit 42 "Updated description"       # Update text
 idea move 42 active                      # Change status
 idea move 10 11 12 queued                # Batch move multiple items
@@ -119,7 +120,15 @@ idea goal unlink 1 42                    # Remove link between goal #1 and idea 
 - **Goals View**: Real-time habit streaks, daily checklists, goal creation, and collapsible history sections.
 - **Stats View**: A year-long completion heatmap, 7/30/90-day and all-time completion rates, a by-weekday breakdown, each recurring goal's rate and streaks, and one-off goals done/missed/pending.
 - **Kanban Board**: Drag-and-drop cards across stages, instant search and status filtering, and multi-card actions.
-- **Card Details & Pop-out**: Edit metadata attributes, view linked goals, or pop out a card into an independent window (`static/idea.html`).
+- **Card Details**: Edit an idea's text, status, fields and notes in a quick modal over the board.
+- **Full Idea View** (`static/idea.html`, the modal's **full view** button): everything about one idea on its own page -- a progress bar across its linked goals, each goal's streaks and last 12 weeks with today's check-off, notes with a chapter list built from their `#`/`##` headings, fields as a stat sheet, and an activity timeline including status changes. Every edit saves immediately.
+- **Markdown Notes**: Notes open as rendered markdown (headings, nested lists, `- [ ]` tasks, tables, quotes, code, links); click **edit** or double-click to change them. Callouts are quotes that start with a tag, e.g. `> [!ALARM] If you fall behind` (also `NOTE`, `TIP`, `GOAL`, `WIN`, `WARNING`, `IMPORTANT`; any other word works as a plain card). Fenced blocks tagged `schedule`, `phases` or `targets` are drawn as pictures of their data, and the text inside stays plain for the CLI. Separate columns with `|` or two or more spaces:
+
+  - ` ```schedule `: a header row of activities, then one row of hours per day, using `-` for none. It's drawn as a heat grid with row and column totals, and today's weekday is marked.
+  - ` ```phases `: `name | start | end | note`, with ISO dates and both days included. It's drawn as a timeline showing today and which week of the current phase you're in.
+  - ` ```targets `: an optional `unit: problems` line, then `name | start date | running total | note`. It's drawn as the amount planned so far against the goal, with a bar and a week-by-week list.
+
+  A block that doesn't fit its format shows as ordinary code. Each section shows how many of its `- [ ]` tasks are done. Rendered with bundled [marked](https://github.com/markedjs/marked) and sanitized with [DOMPurify](https://github.com/cure53/DOMPurify) (`static/vendor/`), so no network access is needed. Notes can't run scripts, restyle the page, add form fields, or load anything from another site -- images show only from this app or as embedded `data:` images.
 - **Clean Aesthetic**: Distraction-free typography powered by self-hosted JetBrains Mono font weights, with Dark, Light, and System themes.
 
 ---
@@ -133,7 +142,11 @@ Run the test suite with `pytest`:
 .venv/bin/pytest
 ```
 
-Tests run in isolated environments using temporary databases and ephemeral encryption keys (see `tests/conftest.py`), ensuring your local database remains untouched.
+Tests run in isolated environments using temporary databases and ephemeral encryption keys (see `tests/conftest.py`), ensuring your local database remains untouched. Every test runs on a fixed date (2026-09-10) via the `IDEA_BANK_TODAY` environment variable, which pins the date the app treats as today, so results never depend on the day you run them.
+
+The notes-renderer tests in `tests/js/` use Node's built-in test runner (no npm packages) and run as part of `pytest`. They're skipped if `node` isn't installed.
+
+Browser tests (`tests/test_gui_notes.py`, `tests/test_gui_idea_view.py`) drive the real pages in headless Chromium via Playwright. Install the browser once with `.venv/bin/playwright install --only-shell chromium`. They include the notes sanitizer's security tests, so without a browser they fail rather than skip; run `pytest --skip-browser-tests` to leave them out on purpose.
 
 ---
 

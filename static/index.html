@@ -194,8 +194,12 @@
     </div>
 
     <div class="modal-section">
-      <div class="modal-section-label">notes</div>
-      <textarea class="modal-notes" id="modal-notes" rows="2" placeholder="freeform notes..."></textarea>
+      <div class="modal-section-head">
+        <div class="modal-section-label">notes</div>
+        <button type="button" class="notes-toggle" id="modal-notes-toggle" aria-pressed="false">edit</button>
+      </div>
+      <div class="notes-view" id="modal-notes-view" title="double-click to edit"></div>
+      <textarea class="modal-notes" id="modal-notes" rows="4" placeholder="notes -- markdown works: # heading, - list, - [ ] task, **bold**, `code`, [link](https://...)" hidden></textarea>
     </div>
 
     <div class="modal-meta" id="modal-meta"></div>
@@ -203,13 +207,18 @@
     <div class="modal-footer">
       <div class="modal-footer-left">
         <button type="button" class="modal-delete" id="modal-delete">delete</button>
-        <button type="button" class="modal-popout" id="modal-popout">pop out</button>
+        <button type="button" class="modal-popout" id="modal-popout" title="open everything about this idea on its own page">full view</button>
       </div>
       <button type="button" class="modal-done" id="modal-done">done</button>
     </div>
   </div>
 </div>
 
+<script src="vendor/marked.umd.js"></script>
+<script src="vendor/purify.min.js"></script>
+<script src="note-blocks.js"></script>
+<script src="markdown.js"></script>
+<script src="ui-common.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

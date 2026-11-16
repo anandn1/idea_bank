@@ -4,6 +4,11 @@ Each test gets its own isolated DB via the run_cli fixture.
 """
 
 import json
+import sqlite3
+
+import pytest
+
+from conftest import FIXED_TODAY
 
 
 def parse(result):
@@ -515,16 +520,10 @@ def test_goal_stop_recurring_removes_it_from_todays_list(run_cli):
 
 
 def test_goal_list_weekday_tag_formatting(run_cli):
-    from datetime import date, timedelta
-
     run_cli("goal", "add", "gym", "--weekdays", "mon,wed,fri", "--json")
-    # find the next Mon/Wed/Fri on or after today, so the goal is actually
-    # due on the date we ask about regardless of which day the suite runs
-    due_date = date.today()
-    while due_date.weekday() not in (0, 2, 4):
-        due_date += timedelta(days=1)
 
-    result = run_cli("goal", "list", "--date", due_date.isoformat())
+    # the Friday right after FIXED_TODAY (a Thursday), so the goal is due
+    result = run_cli("goal", "list", "--date", "2026-09-11")
     assert result.returncode == 0
     assert "Mon/Wed/Fri" in result.stdout
 
@@ -762,16 +761,17 @@ def test_goal_stats_json_shape(run_cli):
     }
 
 
-def test_goal_stats_reflects_a_completed_recurring_goal(run_cli):
+def test_goal_stats_reflects_a_completed_recurring_goal(run_cli, fixed_today):
     goal = parse(run_cli("goal", "add", "walk", "--weekdays", "daily", "--json"))
     run_cli("goal", "done", str(goal["id"]), "--json")
 
     stats = parse(run_cli("goal", "stats", "--json"))
 
+    assert stats["today"] == fixed_today
     assert stats["totals"]["checkoffs"] == 1
     assert stats["recurring"][0]["text"] == "walk"
     assert stats["recurring"][0]["streak"] == 1
-    assert stats["heatmap"][-1] == {"date": stats["today"], "done": 1, "due": 1}
+    assert stats["heatmap"] == [{"date": fixed_today, "done": 1, "due": 1}]
 
 
 def test_goal_stats_human_output_on_empty_db(run_cli):
@@ -783,13 +783,222 @@ def test_goal_stats_human_output_on_empty_db(run_cli):
     assert "last 12 weeks" not in result.stdout
 
 
-def test_goal_stats_human_output_lists_goal_and_heatmap(run_cli):
+def test_goal_stats_human_output_lists_goal_and_heatmap(run_cli, fixed_today):
     goal = parse(run_cli("goal", "add", "walk", "--weekdays", "daily", "--json"))
     run_cli("goal", "done", str(goal["id"]), "--json")
 
     result = run_cli("goal", "stats")
 
     assert result.returncode == 0
+    assert f"goal stats through {fixed_today}" in result.stdout
     assert f"#{goal['id']} (daily) walk" in result.stdout
     assert "streak 1, best 1" in result.stdout
     assert "last 12 weeks" in result.stdout
+
+
+# ---- show --full ----
+
+
+def test_show_full_json_shape(run_cli):
+    idea = parse(run_cli("capture", "quest", "--json"))
+
+    result = run_cli("show", str(idea["id"]), "--full", "--json")
+
+    assert result.returncode == 0
+    overview = parse(result)
+    assert set(overview) == {"today", "idea", "progress", "goals", "timeline"}
+    assert overview["idea"]["text"] == "quest"
+    assert overview["timeline"] == [{"at": idea["created_at"], "kind": "created"}]
+
+
+def test_show_full_several_ids_gives_a_list(run_cli):
+    a = parse(run_cli("capture", "a", "--json"))
+    b = parse(run_cli("capture", "b", "--json"))
+
+    overviews = parse(run_cli("show", str(a["id"]), str(b["id"]), "--full", "--json"))
+
+    assert [o["idea"]["text"] for o in overviews] == ["a", "b"]
+
+
+def test_show_full_missing_id_fails(run_cli):
+    result = run_cli("show", "999", "--full", "--json")
+
+    assert result.returncode == 1
+    assert "999" in parse(result)["error"]
+
+
+def test_show_full_includes_linked_goal_progress(run_cli):
+    idea = parse(run_cli("capture", "quest", "--json"))
+    goal = parse(
+        run_cli(
+            "goal",
+            "add",
+            "walk",
+            "--weekdays",
+            "daily",
+            "--idea",
+            str(idea["id"]),
+            "--json",
+        )
+    )
+    run_cli("goal", "done", str(goal["id"]), "--json")
+
+    overview = parse(run_cli("show", str(idea["id"]), "--full", "--json"))
+
+    walk = overview["goals"][0]
+    assert (walk["done_today"], walk["streak"], walk["done"], walk["due"]) == (
+        True,
+        1,
+        1,
+        1,
+    )
+    assert overview["progress"]["checkoffs"] == 1
+
+
+def test_show_full_human_output(run_cli):
+    idea = parse(run_cli("capture", "quest", "--field", "area=fitness", "--json"))
+    run_cli("edit", str(idea["id"]), "--notes", "# Plan\nstep one", "--json")
+    run_cli(
+        "goal",
+        "add",
+        "walk",
+        "--weekdays",
+        "daily",
+        "--idea",
+        str(idea["id"]),
+        "--json",
+    )
+    run_cli("move", str(idea["id"]), "-a", "--json")
+
+    result = run_cli("show", str(idea["id"]), "--full")
+
+    assert result.returncode == 0
+    out = result.stdout
+    assert out.startswith(f"#{idea['id']} [active] quest\n")
+    assert "fields\n  area: fitness" in out
+    assert "(daily) walk" in out
+    assert "notes\n  # Plan\n  step one" in out
+    assert "status inbox -> active" in out
+    assert "idea created" in out
+
+
+def test_show_without_full_is_unchanged(run_cli):
+    idea = parse(run_cli("capture", "quest", "--json"))
+
+    shown = parse(run_cli("show", str(idea["id"]), "--json"))
+
+    assert shown == {**idea, "goals": []}
+
+
+def test_move_records_status_history(run_cli):
+    idea = parse(run_cli("capture", "x", "--json"))
+    run_cli("move", str(idea["id"]), "-q", "--json")
+    run_cli("move", str(idea["id"]), "-q", "--json")  # same status: not a change
+
+    timeline = parse(run_cli("show", str(idea["id"]), "--full", "--json"))["timeline"]
+
+    changes = [(e["from"], e["to"]) for e in timeline if e["kind"] == "status"]
+    assert changes == [("inbox", "queued")]
+
+
+def test_show_full_human_output_progress_and_goal_lines(run_cli):
+    idea = parse(run_cli("capture", "quest", "--json"))
+    walk = parse(
+        run_cli(
+            "goal",
+            "add",
+            "walk",
+            "--weekdays",
+            "daily",
+            "--idea",
+            str(idea["id"]),
+            "--json",
+        )
+    )
+    run_cli("goal", "done", str(walk["id"]), "--json")
+    run_cli("goal", "stop", str(walk["id"]), "--json")
+
+    out = run_cli("show", str(idea["id"]), "--full").stdout
+
+    assert "  progress  " + "█" * 20 + "  100%  (1/1)   check-offs 1\n" in out
+    assert f"(daily) walk [stopped {FIXED_TODAY}]" in out
+    assert "      100%  (1/1), streak 0, best 1, last done " in out
+
+
+def test_show_full_mixed_existing_and_missing_ids_fails(run_cli):
+    idea = parse(run_cli("capture", "real", "--json"))
+
+    result = run_cli("show", str(idea["id"]), "999", "--full", "--json")
+
+    assert result.returncode == 1
+    assert parse(result) == {"error": "no idea(s) with id(s): 999"}
+
+
+def test_show_full_missing_id_error_in_text_mode(run_cli):
+    result = run_cli("show", "999", "--full")
+
+    assert result.returncode == 1
+    assert "error: no idea(s) with id(s): 999" in result.stderr
+
+
+# ---- pinned clock ----
+
+
+def test_cli_move_stamps_updated_at_with_the_pinned_date(run_cli, cli_db_path, fixed_today):
+    created = parse(run_cli("capture", "x", "--json"))
+    conn = sqlite3.connect(cli_db_path)
+    conn.execute("UPDATE ideas SET updated_at = '2020-01-01 00:00:00'")
+    conn.commit()
+    conn.close()
+
+    moved = parse(run_cli("move", str(created["id"]), "-a", "--json"))
+
+    assert moved["updated_at"].startswith(f"{fixed_today} ")
+
+
+@pytest.mark.parametrize("bad_date", ["not-a-date", "2026-13-01", "2026-9-10", "20260910"])
+def test_goal_add_rejects_a_bad_date(run_cli, bad_date):
+    result = run_cli("goal", "add", "x", "--date", bad_date, "--json")
+
+    assert result.returncode == 2
+    assert "not a YYYY-MM-DD date" in result.stderr
+    assert parse(run_cli("goal", "stats", "--json"))["one_offs"]["pending"] == 0
+
+
+@pytest.mark.parametrize("subcommand", ["done", "undo", "list"])
+def test_goal_date_flags_reject_a_bad_date(run_cli, subcommand):
+    args = ["goal", subcommand, *(["1"] if subcommand != "list" else []), "--date", "garbage"]
+
+    result = run_cli(*args)
+
+    assert result.returncode == 2
+    assert "not a YYYY-MM-DD date: 'garbage'" in result.stderr
+
+
+
+def test_show_full_human_output_without_goals_or_notes(run_cli):
+    idea = parse(run_cli("capture", "bare", "--json"))
+
+    out = run_cli("show", str(idea["id"]), "--full").stdout
+
+    assert "\ngoals\n  none linked\n" in out
+    assert "\nnotes\n" not in out
+    assert "\nfields\n" not in out
+
+
+def test_show_full_several_ideas_are_separated_by_a_blank_line(run_cli):
+    a = parse(run_cli("capture", "a", "--json"))
+    b = parse(run_cli("capture", "b", "--json"))
+
+    out = run_cli("show", str(a["id"]), str(b["id"]), "--full").stdout
+
+    assert f"idea created\n\n#{b['id']} [inbox] b\n" in out
+
+
+def test_show_full_keeps_blank_lines_in_notes(run_cli):
+    idea = parse(run_cli("capture", "noted", "--json"))
+    run_cli("edit", str(idea["id"]), "--notes", "one\n\ntwo", "--json")
+
+    out = run_cli("show", str(idea["id"]), "--full").stdout
+
+    assert "notes\n  one\n\n  two\n" in out

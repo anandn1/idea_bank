@@ -20,7 +20,6 @@ const modeIndicator = document.getElementById("mode-indicator");
 // persisted in localStorage. "system" means no explicit override at all --
 // style.css's prefers-color-scheme block takes it from there.
 const THEME_ORDER = ["dark", "light", "system"];
-const THEME_STORAGE_KEY = "idea-bank-theme";
 const themeToggle = document.getElementById("theme-toggle");
 const themeToggleLabel = document.getElementById("theme-toggle-label");
 
@@ -34,12 +33,7 @@ function applyTheme(theme) {
 }
 
 function loadTheme() {
-  let stored = null;
-  try {
-    stored = localStorage.getItem(THEME_STORAGE_KEY);
-  } catch {
-    // localStorage unavailable (private browsing, etc.) -- just defaults below
-  }
+  const stored = readStoredTheme();
   applyTheme(THEME_ORDER.includes(stored) ? stored : "dark");
 }
 
@@ -55,23 +49,6 @@ themeToggle.addEventListener("click", () => {
 });
 
 loadTheme();
-
-function relativeTime(dbTimestamp) {
-  const date = new Date(dbTimestamp.replace(" ", "T"));
-  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
-
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-  const years = Math.floor(days / 365);
-  return `${years}y ago`;
-}
 
 function reduceMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -595,17 +572,6 @@ function buildGoalHistoryRow(goal) {
   return row;
 }
 
-const WEEKDAY_DISPLAY = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
-function formatWeekdays(weekdays) {
-  if (!weekdays) return "one-off";
-  const days = new Set(weekdays);
-  if (days.size === 7) return "daily";
-  if (days.size === 5 && [0, 1, 2, 3, 4].every((d) => days.has(d))) return "weekdays";
-  if (days.size === 2 && days.has(5) && days.has(6)) return "weekends";
-  return [...days].sort((a, b) => a - b).map((d) => WEEKDAY_DISPLAY[d]).join("/");
-}
-
 function buildGoalRow(goal) {
   const row = document.createElement("div");
   row.className = "goal-row" + (goal.completed_at ? " done" : "");
@@ -753,27 +719,6 @@ async function fetchStats() {
   const res = await fetch("/api/goals/stats");
   goalStats = await res.json();
   if (currentScreen === "stats") renderStats();
-}
-
-function el(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function parseLocalDate(isoDate) {
-  const [year, month, day] = isoDate.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
-
-// Monday=0..Sunday=6, matching the backend's weekday numbering.
-function mondayFirstWeekday(date) {
-  return (date.getDay() + 6) % 7;
-}
-
-function formatPercent(rate) {
-  return rate.rate === null ? "--" : `${Math.round(rate.rate * 100)}%`;
 }
 
 function renderStats() {
@@ -925,7 +870,7 @@ function renderRateRows(container, labelledRates) {
     const row = el("div", "rate-row" + (rate.rate === null ? " empty" : ""));
     row.appendChild(el("span", "rate-label", label));
     row.appendChild(buildRateBar(rate));
-    row.appendChild(el("span", "rate-value", formatPercent(rate)));
+    row.appendChild(el("span", "rate-value", formatPercent(rate.rate)));
     row.appendChild(el("span", "rate-count", `${rate.done}/${rate.due}`));
     container.appendChild(row);
   }
@@ -944,7 +889,7 @@ function buildStatsGoalRow(goal) {
 
   const rateLine = el("div", "rate-row");
   rateLine.appendChild(buildRateBar(goal));
-  rateLine.appendChild(el("span", "rate-value", formatPercent(goal)));
+  rateLine.appendChild(el("span", "rate-value", formatPercent(goal.rate)));
   rateLine.appendChild(el("span", "rate-count", `${goal.done}/${goal.due}`));
   row.appendChild(rateLine);
 
@@ -1248,6 +1193,10 @@ document.querySelectorAll(".cards").forEach((container) => {
 
 let modalIdeaId = null;
 let modalPending = null; // { text, status, fields: [[key, value], ...], notes }
+// The idea as it was when the modal opened: "done" sends only what changed
+// since then, so edits saved elsewhere meanwhile (the full view, the CLI)
+// aren't overwritten with this modal's stale copy.
+let modalOriginal = null;
 
 const modalBackdrop = document.getElementById("modal-backdrop");
 const modalStatusPills = document.getElementById("modal-status-pills");
@@ -1255,6 +1204,11 @@ const modalTextEl = document.getElementById("modal-text");
 const modalFieldsEl = document.getElementById("modal-fields");
 const modalGoalsEl = document.getElementById("modal-goals");
 const modalNotesEl = document.getElementById("modal-notes");
+const modalNotesEditor = IdeaMarkdown.createNotesEditor({
+  viewEl: document.getElementById("modal-notes-view"),
+  textareaEl: modalNotesEl,
+  toggleEl: document.getElementById("modal-notes-toggle"),
+});
 const modalMetaEl = document.getElementById("modal-meta");
 
 modalTextEl.addEventListener("input", () => {
@@ -1268,6 +1222,12 @@ function openModal(id) {
   const idea = ideas.find((i) => i.id === id);
   if (!idea) return;
   modalIdeaId = id;
+  modalOriginal = {
+    text: idea.text,
+    status: idea.status,
+    fields: { ...(idea.fields || {}) },
+    notes: idea.notes || "",
+  };
   modalPending = {
     text: idea.text,
     status: idea.status,
@@ -1275,6 +1235,7 @@ function openModal(id) {
     notes: idea.notes || "",
   };
   renderModal(idea);
+  modalNotesEditor.setNotes(modalPending.notes);
   modalGoalsEl.innerHTML = ""; // clear the previous idea's goals while the fetch below is in flight
   renderModalGoals(id);
   modalBackdrop.hidden = false;
@@ -1343,7 +1304,6 @@ function buildModalGoalGroup(label, goals, completed) {
 
 function renderModal(idea) {
   modalTextEl.value = modalPending.text;
-  modalNotesEl.value = modalPending.notes;
   modalMetaEl.textContent = `created ${idea.created_at}   updated ${idea.updated_at}`;
 
   modalStatusPills.innerHTML = "";
@@ -1415,28 +1375,37 @@ document.getElementById("modal-add-field").addEventListener("click", () => {
   if (lastRow) lastRow.focus();
 });
 
+function changedSinceOpened(original, pending) {
+  const fields = {};
+  for (const [key, value] of pending.fields) {
+    const trimmedKey = key.trim();
+    if (trimmedKey) fields[trimmedKey] = value;
+  }
+  const text = pending.text.trim();
+
+  const changes = {};
+  if (text && text !== original.text) changes.text = text;
+  if (pending.status !== original.status) changes.status = pending.status;
+  if (pending.notes !== original.notes) changes.notes = pending.notes || null;
+  if (JSON.stringify(fields) !== JSON.stringify(original.fields)) changes.fields = fields;
+  return changes;
+}
+
 async function closeModal(save) {
   const id = modalIdeaId;
   const pending = modalPending;
+  const original = modalOriginal;
   modalBackdrop.hidden = true;
   modalIdeaId = null;
   modalPending = null;
+  modalOriginal = null;
   if (!save || id === null) return;
 
   const idea = ideas.find((i) => i.id === id);
   if (!idea) return;
 
-  const fieldsObj = {};
-  for (const [key, value] of pending.fields) {
-    const trimmedKey = key.trim();
-    if (trimmedKey) fieldsObj[trimmedKey] = value;
-  }
-  const trimmedText = pending.text.trim();
-
-  const payload = { fields: fieldsObj };
-  if (trimmedText) payload.text = trimmedText;
-  if (pending.status !== idea.status) payload.status = pending.status;
-  if (pending.notes !== (idea.notes || "")) payload.notes = pending.notes || null;
+  const payload = changedSinceOpened(original, pending);
+  if (Object.keys(payload).length === 0) return;
 
   try {
     const updated = await patchIdea(id, payload);
@@ -1458,7 +1427,7 @@ document.getElementById("modal-popout").addEventListener("click", () => {
   if (modalIdeaId === null) return;
   // a per-id window name so popping out several ideas opens separate
   // windows instead of one replacing another
-  window.open(`/idea.html?id=${modalIdeaId}`, `idea-${modalIdeaId}`, "width=560,height=680");
+  window.open(`/idea.html?id=${modalIdeaId}`, `idea-${modalIdeaId}`, "width=1180,height=900");
 });
 
 document.getElementById("modal-delete").addEventListener("click", async () => {

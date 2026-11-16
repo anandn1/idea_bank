@@ -26,8 +26,14 @@ frontend framework, no external network calls.
   `dbutil.py` falls back to the venv's `site-packages` for its one
   non-stdlib dependency (`cryptography`) if it's not on the system path.
 - **`static/`** — vanilla HTML/CSS/JS, no build step, no framework.
-  `index.html` is the board; `idea.html` is a standalone pop-out idea
-  editor, opened from the board's detail modal; `fonts/` holds the
+  `index.html` is the board; `idea.html` + `idea-view.js` is the full
+  idea view (everything about one idea from `/api/ideas/<id>/overview`,
+  the same data as `idea show <id> --full --json`; edits save
+  immediately), opened from the board modal's "full view" button;
+  `markdown.js` renders
+  notes for both, via the vendored libraries in `vendor/` (marked to
+  parse, DOMPurify to sanitize -- never put marked's output on the page
+  unsanitized; versions and checksums in `vendor/README.md`); `fonts/` holds the
   self-hosted JetBrains Mono weight files (see rule 5) — the GUI's only
   typeface, referenced by `style.css`'s `@font-face` rules.
 - **`scripts/`** — `migrate.py` (one-time/re-runnable import from the old
@@ -45,8 +51,9 @@ frontend framework, no external network calls.
    do, and vice versa. Both ultimately call the same `dbutil.py` operations, and the
    JSON API mirrors the CLI's `--json` output shape. **Display-only GUI
    features have no CLI equivalent** (the theme toggle, the
-   smart-default-date cutoff, the auto-refresh interval, the collapsible
-   current/completed goal sections, the pop-out window, the desktop
+   smart-default-date cutoff, the auto-refresh interval, rendering notes as
+   markdown (the CLI shows the same notes text as written), the collapsible
+   current/completed goal sections, the full idea view's own window, the desktop
    launcher) — there's no data behind them to
    script against. That's the only exception. When you add a capability to
    one surface, add it to the other in the same change unless it's purely

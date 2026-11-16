@@ -101,6 +101,17 @@ CREATE TABLE IF NOT EXISTS goal_ideas (
     PRIMARY KEY (goal_id, idea_id)
 );
 
+-- one row per idea status change (from now on -- earlier changes weren't
+-- recorded), feeding the idea view's timeline. No free text, so nothing
+-- here needs encrypting.
+CREATE TABLE IF NOT EXISTS idea_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    idea_id INTEGER NOT NULL,
+    from_status TEXT,
+    to_status TEXT NOT NULL,
+    changed_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS import_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     raw_line TEXT NOT NULL UNIQUE,
@@ -117,8 +128,24 @@ CREATE TABLE IF NOT EXISTS flagged_imports (
 """
 
 
+# IDEA_BANK_TODAY (an ISO date, e.g. 2026-09-10) pins the calendar date every clock read
+# below returns -- set by the test suite so results don't depend on the day
+# it runs. Time of day still comes from the real clock, so timestamps keep
+# their order, except across a real midnight (the time wraps back while the
+# date stays put). Empty or unset means the real clock; a malformed value
+# raises ValueError on every read rather than silently using the real date.
+def now() -> datetime:
+    current = datetime.now()
+    pinned_date = os.environ.get("IDEA_BANK_TODAY")
+    if not pinned_date:
+        return current
+    if not is_iso_date(pinned_date):
+        raise ValueError(f"IDEA_BANK_TODAY must be YYYY-MM-DD, got {pinned_date!r}")
+    return datetime.combine(date_cls.fromisoformat(pinned_date), current.time())
+
+
 def now_str() -> str:
-    return datetime.now().isoformat(sep=" ", timespec="seconds")
+    return now().isoformat(sep=" ", timespec="seconds")
 
 
 # ---- privacy: encryption at rest ----
@@ -400,11 +427,13 @@ def update_idea(conn: sqlite3.Connection, idea_id: int, updates: dict) -> dict |
     while omitting the "notes" key leaves it alone). Centralizing every idea
     write here -- instead of ad-hoc UPDATE statements in server.py/cli/idea
     -- is what guarantees text/notes/fields are always encrypted before they
-    hit the database."""
-    if get_idea(conn, idea_id) is None:
+    hit the database, and that every status change is logged to idea_events."""
+    before = get_idea(conn, idea_id)
+    if before is None:
         return None
 
-    set_clauses, values = ["updated_at = ?"], [now_str()]
+    changed_at = now_str()
+    set_clauses, values = ["updated_at = ?"], [changed_at]
     if "status" in updates:
         set_clauses.append("status = ?")
         values.append(updates["status"])
@@ -420,8 +449,23 @@ def update_idea(conn: sqlite3.Connection, idea_id: int, updates: dict) -> dict |
 
     values.append(idea_id)
     conn.execute(f"UPDATE ideas SET {', '.join(set_clauses)} WHERE id = ?", values)
+    if "status" in updates and updates["status"] != before["status"]:
+        conn.execute(
+            "INSERT INTO idea_events (idea_id, from_status, to_status, changed_at) "
+            "VALUES (?, ?, ?, ?)",
+            (idea_id, before["status"], updates["status"], changed_at),
+        )
     conn.commit()
     return get_idea(conn, idea_id)
+
+
+def delete_idea(conn: sqlite3.Connection, idea_id: int) -> None:
+    """Delete an idea along with its status history and goal links (the
+    goals themselves stay -- they're their own things)."""
+    unlink_goals_from_idea(conn, idea_id)
+    conn.execute("DELETE FROM idea_events WHERE idea_id = ?", (idea_id,))
+    conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
+    conn.commit()
 
 
 # ---- goals ----
@@ -442,7 +486,23 @@ def update_idea(conn: sqlite3.Connection, idea_id: int, updates: dict) -> dict |
 
 
 def today_str() -> str:
-    return datetime.now().date().isoformat()
+    return now().date().isoformat()
+
+
+def is_iso_date(value) -> bool:
+    """True only for a real calendar date written exactly YYYY-MM-DD -- the
+    one shape every date column and comparison here relies on."""
+    if not isinstance(value, str):
+        return False
+    try:
+        return date_cls.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
+
+
+def _resolve_today(today: str | None) -> date_cls:
+    """An explicit "YYYY-MM-DD", or the current date (see now())."""
+    return date_cls.fromisoformat(today) if today else now().date()
 
 
 def create_goal(
@@ -455,7 +515,10 @@ def create_goal(
     """Returns None if any given idea id doesn't exist. A non-empty
     `weekdays` (Monday=0..Sunday=6) makes the goal recurring and ignores
     target_date; otherwise it's one-off, defaulting target_date to today if
-    not given."""
+    not given. Raises ValueError for a target_date that isn't YYYY-MM-DD --
+    callers validate first; this just keeps a bad one out of the database."""
+    if target_date is not None and not is_iso_date(target_date):
+        raise ValueError(f"target_date must be YYYY-MM-DD, got {target_date!r}")
     idea_ids = sorted(set(idea_ids)) if idea_ids else []
     for idea_id in idea_ids:
         if get_idea(conn, idea_id) is None:
@@ -654,7 +717,7 @@ def compute_streak(conn: sqlite3.Connection, today: str | None = None) -> dict:
     """Walk backward from `today`, counting consecutive won days. A day with
     nothing due is skipped, not counted and not a break. An unfinished
     today doesn't break the streak -- it's just not counted until it's won."""
-    today_d = date_cls.fromisoformat(today) if today else date_cls.today()
+    today_d = _resolve_today(today)
     floor = _earliest_goal_date(conn)
 
     today_due = goals_due_on(conn, today_d.isoformat())
@@ -749,7 +812,7 @@ def goals_for_idea(conn: sqlite3.Connection, idea_id: int) -> list[dict] | None:
     rows = conn.execute(
         "SELECT g.id, g.text, g.weekdays, g.target_date, g.created_at, g.archived_at "
         "FROM goals g JOIN goal_ideas gi ON gi.goal_id = g.id "
-        "WHERE gi.idea_id = ? ORDER BY g.created_at",
+        "WHERE gi.idea_id = ? ORDER BY g.created_at, g.id",
         (idea_id,),
     ).fetchall()
     return [
@@ -837,6 +900,15 @@ def _tracked_dates(
     return sorted(set(_due_dates_through(goal, today)) | checked_off)
 
 
+def _goal_days(
+    goal: dict, completed: set[tuple[int, str]], today: date_cls
+) -> list[GoalDay]:
+    return [
+        GoalDay(goal["id"], day, (goal["id"], day.isoformat()) in completed)
+        for day in _tracked_dates(goal, completed, today)
+    ]
+
+
 def _completed_keys(conn: sqlite3.Connection) -> set[tuple[int, str]]:
     rows = conn.execute(
         "SELECT goal_id, date FROM goal_log WHERE completed_at IS NOT NULL"
@@ -866,7 +938,10 @@ def _rolling_rates(settled: list[GoalDay], today: date_cls) -> list[dict]:
 
 def _weekday_rates(settled: list[GoalDay]) -> list[dict]:
     return [
-        {"weekday": weekday, **_rate([gd for gd in settled if gd.day.weekday() == weekday])}
+        {
+            "weekday": weekday,
+            **_rate([gd for gd in settled if gd.day.weekday() == weekday]),
+        }
         for weekday in range(7)
     ]
 
@@ -922,23 +997,30 @@ def _current_and_best_run(settled: list[GoalDay]) -> tuple[int, int]:
     return run, best
 
 
-def _recurring_goal_stats(goal: dict, own_days: list[GoalDay], today: date_cls) -> dict:
-    """A stopped goal has no current streak -- only its best one."""
+def _goal_progress(goal: dict, own_days: list[GoalDay], today: date_cls) -> dict:
+    """One goal's rate, current and best streak, and last done day. A
+    stopped goal has no current streak -- only its best one."""
     settled = _settled(own_days, today)
     streak, best_streak = _current_and_best_run(settled)
     if goal["archived_at"]:
         streak = 0
     done_days = [gd.day for gd in own_days if gd.done]
     return {
+        **_rate(settled),
+        "streak": streak,
+        "best_streak": best_streak,
+        "last_done": max(done_days).isoformat() if done_days else None,
+    }
+
+
+def _recurring_goal_stats(goal: dict, own_days: list[GoalDay], today: date_cls) -> dict:
+    return {
         "id": goal["id"],
         "text": goal["text"],
         "weekdays": goal["weekdays"],
         "created_at": goal["created_at"],
         "archived_at": goal["archived_at"],
-        **_rate(settled),
-        "streak": streak,
-        "best_streak": best_streak,
-        "last_done": max(done_days).isoformat() if done_days else None,
+        **_goal_progress(goal, own_days, today),
     }
 
 
@@ -967,18 +1049,14 @@ def goal_stats(conn: sqlite3.Connection, today: str | None = None) -> dict:
     recurring goals (active first, then stopped), and one-off counts. All of
     it runs through `today` -- except one_offs, which also counts goals
     targeting later days (done early or still pending)."""
-    today_d = date_cls.fromisoformat(today) if today else date_cls.today()
-    rows = conn.execute(f"SELECT {GOAL_COLUMNS} FROM goals ORDER BY created_at").fetchall()
+    today_d = _resolve_today(today)
+    rows = conn.execute(
+        f"SELECT {GOAL_COLUMNS} FROM goals ORDER BY created_at"
+    ).fetchall()
     goals = [row_to_goal(conn, row) for row in rows]
     completed = _completed_keys(conn)
 
-    days_by_goal = {
-        goal["id"]: [
-            GoalDay(goal["id"], day, (goal["id"], day.isoformat()) in completed)
-            for day in _tracked_dates(goal, completed, today_d)
-        ]
-        for goal in goals
-    }
+    days_by_goal = {goal["id"]: _goal_days(goal, completed, today_d) for goal in goals}
     goal_days = [gd for own_days in days_by_goal.values() for gd in own_days]
     settled = _settled(goal_days, today_d)
     recurring = sorted(
@@ -998,4 +1076,130 @@ def goal_stats(conn: sqlite3.Connection, today: str | None = None) -> dict:
         "one_offs": _one_off_summary(
             [g for g in goals if g["weekdays"] is None], completed, today_d
         ),
+    }
+
+
+# ---- idea overview: the full idea view and `idea show --full` ----
+
+OVERVIEW_RECENT_DAYS = 84  # 12 weeks of per-goal history
+
+
+def _recent_goal_days(own_days: list[GoalDay], today: date_cls) -> list[dict]:
+    """The last OVERVIEW_RECENT_DAYS days through today, each marked due/done
+    for this goal (due 0 on days it wasn't scheduled)."""
+    by_day = {gd.day: gd for gd in own_days}
+    start = today - timedelta(days=OVERVIEW_RECENT_DAYS - 1)
+    recent = []
+    for day in _days_between(start, today):
+        goal_day = by_day.get(day)
+        recent.append(
+            {
+                "date": day.isoformat(),
+                "due": int(goal_day is not None),
+                "done": int(goal_day is not None and goal_day.done),
+            }
+        )
+    return recent
+
+
+def _goal_overview(goal: dict, own_days: list[GoalDay], today: date_cls) -> dict:
+    today_entry = next((gd for gd in own_days if gd.day == today), None)
+    return {
+        **goal,
+        **_goal_progress(goal, own_days, today),
+        "due_today": today_entry is not None,
+        "done_today": today_entry is not None and today_entry.done,
+        "recent": _recent_goal_days(own_days, today),
+    }
+
+
+def _one_off_completed_at(conn: sqlite3.Connection, goal: dict) -> str | None:
+    row = conn.execute(
+        "SELECT completed_at FROM goal_log "
+        "WHERE goal_id = ? AND date = ? AND completed_at IS NOT NULL",
+        (goal["id"], goal["target_date"]),
+    ).fetchone()
+    return row["completed_at"] if row else None
+
+
+# Timestamps only go down to the second, so events in the same second
+# (usually a script, rarely a person) can't be told apart by time. Within a
+# second they're ordered by kind, in the order the usual flow happens: an
+# idea is created, gets its status, then gets goals, which are later done
+# or stopped.
+TIMELINE_TIE_ORDER = ("created", "status", "goal_created", "goal_done", "goal_stopped")
+
+
+def _timeline_sort_key(numbered_event: tuple[int, dict]) -> tuple[str, int, int]:
+    """Time, then kind (see above), then the order events were recorded in
+    -- status changes by row id, goals by creation order -- so two events
+    of the same kind in the same second also read newest first."""
+    recorded_order, event = numbered_event
+    return event["at"], TIMELINE_TIE_ORDER.index(event["kind"]), recorded_order
+
+
+def _idea_timeline(
+    conn: sqlite3.Connection, idea: dict, goals: list[dict]
+) -> list[dict]:
+    """Newest first: the idea's creation and status changes, plus each linked
+    goal being created, stopped, or (one-offs) completed. Daily check-offs of
+    recurring goals are left out -- each goal's own history shows those."""
+    events = [{"at": idea["created_at"], "kind": "created"}]
+    rows = conn.execute(
+        "SELECT from_status, to_status, changed_at FROM idea_events "
+        "WHERE idea_id = ? ORDER BY id",
+        (idea["id"],),
+    ).fetchall()
+    events += [
+        {
+            "at": r["changed_at"],
+            "kind": "status",
+            "from": r["from_status"],
+            "to": r["to_status"],
+        }
+        for r in rows
+    ]
+    for goal in goals:
+        about_goal = {"goal_id": goal["id"], "goal_text": goal["text"]}
+        events.append({"at": goal["created_at"], "kind": "goal_created", **about_goal})
+        if goal["archived_at"]:
+            events.append(
+                {"at": goal["archived_at"], "kind": "goal_stopped", **about_goal}
+            )
+        if goal["weekdays"] is None:
+            completed_at = _one_off_completed_at(conn, goal)
+            if completed_at:
+                events.append({"at": completed_at, "kind": "goal_done", **about_goal})
+    numbered = sorted(enumerate(events), key=_timeline_sort_key, reverse=True)
+    return [event for _, event in numbered]
+
+
+def idea_overview(
+    conn: sqlite3.Connection, idea_id: int, today: str | None = None
+) -> dict | None:
+    """Everything about one idea: the idea itself, each linked goal with its
+    completion history and streaks, overall progress across those goals,
+    and an activity timeline. None if the idea doesn't exist. Like
+    goal_stats, an unfinished today never lowers a rate, and check-offs
+    count through today only -- so a one-off ticked off ahead of its date
+    shows as completed (with a timeline entry at the moment it was ticked)
+    but isn't in `progress` until its day comes."""
+    idea = get_idea(conn, idea_id)
+    if idea is None:
+        return None
+    today_d = _resolve_today(today)
+    goals = goals_for_idea(conn, idea_id)
+    completed = _completed_keys(conn)
+
+    days_by_goal = {goal["id"]: _goal_days(goal, completed, today_d) for goal in goals}
+    all_days = [gd for own_days in days_by_goal.values() for gd in own_days]
+    return {
+        "today": today_d.isoformat(),
+        "idea": idea,
+        "progress": {
+            **_rate(_settled(all_days, today_d)),
+            "checkoffs": sum(1 for gd in all_days if gd.done),
+        },
+        "goals": [_goal_overview(g, days_by_goal[g["id"]], today_d) for g in goals],
+        "timeline": _idea_timeline(conn, idea, goals),
     }

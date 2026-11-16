@@ -32,11 +32,39 @@ def get_idea_route(idea_id):
         return jsonify(idea)
 
 
+class BadBody(Exception):
+    """The request's JSON body isn't an object."""
+
+
+@app.errorhandler(BadBody)
+def bad_body(_error):
+    return jsonify({"error": "request body must be a JSON object"}), 400
+
+
+def json_object_body() -> dict:
+    """The JSON body as a dict ({} when there's none). A body that's a list,
+    string or number is a client error, not something to call .get() on."""
+    payload = request.get_json(silent=True)
+    if payload is None:
+        return {}
+    if not isinstance(payload, dict):
+        raise BadBody()
+    return payload
+
+
+def required_text(payload: dict) -> str | None:
+    """payload["text"] stripped, or None if it's missing, blank, or not a string."""
+    text = payload.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return None
+    return text.strip()
+
+
 @app.post("/api/ideas")
 def create_idea():
-    payload = request.get_json(silent=True) or {}
-    text = (payload.get("text") or "").strip()
-    if not text:
+    payload = json_object_body()
+    text = required_text(payload)
+    if text is None:
         return jsonify({"error": "text is required"}), 400
 
     status = payload.get("status", "inbox")
@@ -54,7 +82,7 @@ def create_idea():
 
 @app.patch("/api/ideas/<int:idea_id>")
 def update_idea_route(idea_id):
-    payload = request.get_json(silent=True) or {}
+    payload = json_object_body()
     with dbutil.connection() as conn:
         if dbutil.get_idea(conn, idea_id) is None:
             return jsonify({"error": "not found"}), 404
@@ -66,6 +94,10 @@ def update_idea_route(idea_id):
             if status not in dbutil.STATUSES:
                 return jsonify({"error": f"invalid status: {status}"}), 400
             kwargs["status"] = status
+
+        for key in ("text", "notes"):
+            if payload.get(key) is not None and not isinstance(payload[key], str):
+                return jsonify({"error": f"{key} must be a string"}), 400
 
         if "text" in payload:
             text = (payload["text"] or "").strip()
@@ -91,15 +123,15 @@ def update_idea_route(idea_id):
 @app.delete("/api/ideas/<int:idea_id>")
 def delete_idea(idea_id):
     with dbutil.connection() as conn:
-        dbutil.unlink_goals_from_idea(conn, idea_id)
-        conn.execute("DELETE FROM ideas WHERE id = ?", (idea_id,))
-        conn.commit()
+        dbutil.delete_idea(conn, idea_id)
         return "", 204
 
 
 @app.get("/api/goals")
 def list_goals():
-    date = request.args.get("date") or dbutil.today_str()
+    date = request.args.get("date") or dbutil.today_str()  # "?date=" means today too
+    if not dbutil.is_iso_date(date):
+        return jsonify({"error": "date must be YYYY-MM-DD"}), 400
     with dbutil.connection() as conn:
         goals = dbutil.goals_due_on(conn, date)
         return jsonify({"date": date, "goals": goals})
@@ -107,9 +139,9 @@ def list_goals():
 
 @app.post("/api/goals")
 def create_goal():
-    payload = request.get_json(silent=True) or {}
-    text = (payload.get("text") or "").strip()
-    if not text:
+    payload = json_object_body()
+    text = required_text(payload)
+    if text is None:
         return jsonify({"error": "text is required"}), 400
 
     idea_ids = payload.get("idea_ids")
@@ -134,6 +166,8 @@ def create_goal():
             400,
         )
     target_date = payload.get("target_date")
+    if target_date is not None and not dbutil.is_iso_date(target_date):
+        return jsonify({"error": "target_date must be YYYY-MM-DD"}), 400
     if weekdays and target_date:
         return (
             jsonify({"error": "target_date doesn't apply to a goal with weekdays"}),
@@ -155,13 +189,17 @@ def create_goal():
 
 @app.patch("/api/goals/<int:goal_id>")
 def update_goal(goal_id):
-    payload = request.get_json(silent=True) or {}
-    date = payload.get("date") or dbutil.today_str()
-    if "completed" not in payload:
+    payload = json_object_body()
+    date = payload.get("date")
+    if date is None:
+        date = dbutil.today_str()
+    elif not dbutil.is_iso_date(date):
+        return jsonify({"error": "date must be YYYY-MM-DD"}), 400
+    if not isinstance(payload.get("completed"), bool):
         return jsonify({"error": "completed (bool) is required"}), 400
 
     with dbutil.connection() as conn:
-        goal = dbutil.set_goal_done(conn, goal_id, date, bool(payload["completed"]))
+        goal = dbutil.set_goal_done(conn, goal_id, date, payload["completed"])
         if goal is None:
             return jsonify({"error": "goal not found or not due on that date"}), 404
         return jsonify(goal)
@@ -187,7 +225,7 @@ def remove_goal_route(goal_id):
 
 @app.post("/api/goals/<int:goal_id>/link")
 def link_goal_route(goal_id):
-    payload = request.get_json(silent=True) or {}
+    payload = json_object_body()
     idea_id = payload.get("idea_id")
     if not isinstance(idea_id, int) or isinstance(idea_id, bool):
         return jsonify({"error": "idea_id (integer) is required"}), 400
@@ -201,7 +239,7 @@ def link_goal_route(goal_id):
 
 @app.post("/api/goals/<int:goal_id>/unlink")
 def unlink_goal_route(goal_id):
-    payload = request.get_json(silent=True) or {}
+    payload = json_object_body()
     idea_id = payload.get("idea_id")
     if not isinstance(idea_id, int) or isinstance(idea_id, bool):
         return jsonify({"error": "idea_id (integer) is required"}), 400
@@ -223,6 +261,15 @@ def completed_goals_route():
 def goal_stats_route():
     with dbutil.connection() as conn:
         return jsonify(dbutil.goal_stats(conn))
+
+
+@app.get("/api/ideas/<int:idea_id>/overview")
+def idea_overview_route(idea_id):
+    with dbutil.connection() as conn:
+        overview = dbutil.idea_overview(conn, idea_id)
+        if overview is None:
+            return jsonify({"error": "not found"}), 404
+        return jsonify(overview)
 
 
 @app.get("/api/ideas/<int:idea_id>/goals")
